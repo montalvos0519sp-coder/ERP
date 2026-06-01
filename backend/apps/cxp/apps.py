@@ -1,0 +1,5 @@
+from django.apps import AppConfig
+class CxpConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.cxp"
+    label = "cxp"

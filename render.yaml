@@ -1,0 +1,63 @@
+# Blueprint de Render para el ERP. Hace todo: BD Postgres + Redis + servicio web.
+# Para usarlo: Render Dashboard → New → Blueprint → conecta el repo y selecciona
+# este archivo. Render crea los 3 recursos juntos.
+
+databases:
+  - name: erp-postgres
+    plan: starter            # $7/mes — incluye 256MB RAM, 1GB storage, hasta 97 conexiones.
+    databaseName: erp_profesional
+    user: erp_user
+    postgresMajorVersion: 16
+    ipAllowList: []          # solo acceso interno desde Render.
+
+services:
+  # Redis para cache + Channels (chat WebSockets distribuido).
+  - type: redis
+    name: erp-redis
+    plan: starter            # $10/mes — 25MB RAM, suficiente para cache+pubsub.
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+  # Backend Django (Daphne ASGI para soportar WebSockets).
+  - type: web
+    name: erp-backend
+    runtime: python
+    plan: starter            # $7/mes — 512MB RAM, 0.5 CPU. Sube a "standard" si crece.
+    region: oregon           # Region mas barata. Cambia si necesitas otra.
+    branch: main
+    rootDir: backend
+    buildCommand: "./build.sh"
+    # 3 workers (2*CPU + 1) cubren ~30 usuarios sin sufrir. Daphne maneja
+    # async/WebSockets de forma cooperativa, asi que un solo proceso ya
+    # multiplexa cientos de conexiones.
+    startCommand: "daphne -b 0.0.0.0 -p $PORT erp_core.asgi:application --proxy-headers"
+    healthCheckPath: /admin/login/
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: erp-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: erp-redis
+          property: connectionString
+      # FRONTEND_URL y CORS_ORIGIN se setean MANUALMENTE en el dashboard tras
+      # el primer deploy de Vercel (cuando ya conoces el dominio definitivo).
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: SECURE_SSL_REDIRECT
+        value: "True"
+      - key: WEB_CONCURRENCY
+        value: "3"

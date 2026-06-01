@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git config --global http.sslBackend schannel)",
+      "PowerShell(git config --global --get http.sslBackend)",
+      "Bash(PYTHONWARNINGS=ignore ./venv/Scripts/python.exe manage.py cargar_catalogos_sat)",
+      "Bash(export PYTHONWARNINGS=ignore)",
+      "Bash(./venv/Scripts/python.exe manage.py seed_clientes_proveedores_demo)",
+      "Bash(./venv/Scripts/python.exe manage.py seed_sgc_demo)",
+      "Bash(./venv/Scripts/python.exe manage.py seed_demo_all)",
+      "Bash(./venv/Scripts/python.exe manage.py shell -c ' *)",
+      "Bash(./venv/Scripts/python.exe manage.py makemigrations sgc)"
+    ]
+  }
+}
