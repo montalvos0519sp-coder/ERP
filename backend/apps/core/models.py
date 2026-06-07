@@ -135,6 +135,9 @@ class ConfiguracionEmpresa(models.Model):
     pac_secret_key = models.CharField(max_length=255, blank=True)
     pac_plugin = models.CharField(max_length=10, blank=True, default="9")
     pac_sandbox = models.BooleanField(default=False)
+    pac_serie_cp_id = models.CharField(
+        max_length=40, blank=True,
+        help_text="ID de la serie de Carta Porte (Traslado) en Factura.com")
 
     # Emisor por defecto (puede sobreescribirse por sucursal)
     emisor_rfc = models.CharField(max_length=13, blank=True)

@@ -93,7 +93,16 @@ class NoConformidad(models.Model):
     tipo = models.CharField(max_length=12, choices=TIPOS, default="CORRECTIVA")
     origen = models.CharField(max_length=12, choices=ORIGENES, default="OTRO")
     descripcion = models.TextField(help_text="Descripción de la no conformidad")
-    causa_raiz = models.TextField(blank=True, help_text="Análisis de causa raíz (5 porqués, Ishikawa…)")
+    causa_raiz = models.TextField(blank=True, help_text="Análisis de causa raíz (resumen)")
+    # Análisis estructurado: 5 porqués (lista de strings) e Ishikawa
+    # (dict por categoría 6M -> lista de causas). Alimentan el Pareto de causas.
+    cinco_porques = models.JSONField(default=list, blank=True)
+    ishikawa = models.JSONField(default=dict, blank=True)
+    categoria_causa = models.CharField(
+        max_length=20, blank=True,
+        choices=[("METODO", "Método"), ("MAQUINA", "Maquinaria/Equipo"), ("MANO_OBRA", "Mano de obra"),
+                 ("MATERIAL", "Material"), ("MEDICION", "Medición"), ("MEDIO", "Medio ambiente")],
+        help_text="Categoría 6M de la causa raíz principal (para análisis de Pareto)")
     accion = models.TextField(blank=True, help_text="Acción correctiva/preventiva propuesta")
     responsable = models.CharField(max_length=120, blank=True)
     responsable_user = models.ForeignKey(
@@ -220,6 +229,9 @@ class IndicadorKPI(models.Model):
     sentido = models.CharField(max_length=6, choices=SENTIDOS, default="MAYOR")
     frecuencia = models.CharField(max_length=30, blank=True, help_text="Mensual, trimestral…")
     responsable = models.CharField(max_length=120, blank=True)
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="kpis_asignados", help_text="Responsable de mantener el indicador")
     actualizado = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -242,15 +254,72 @@ class Capacitacion(models.Model):
     responsable_user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="capacitaciones_asignadas", help_text="Responsable de la capacitación")
-    participantes = models.TextField(blank=True, help_text="Empleados / puestos")
+    participantes = models.TextField(blank=True, help_text="Empleados / puestos (texto libre)")
+    # Vínculo a empleados reales de RH (para que aparezca en el portal del empleado).
+    empleados = models.ManyToManyField(
+        "rh.Empleado", blank=True, related_name="capacitaciones_sgc",
+        help_text="Empleados de RH inscritos en esta capacitación")
     fecha = models.DateField(null=True, blank=True)
     vigencia_meses = models.PositiveSmallIntegerField(default=12)
     fecha_vencimiento = models.DateField(null=True, blank=True)
     estado = models.CharField(max_length=12, choices=ESTADOS, default="PROGRAMADA")
-    calificacion = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    calificacion = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True,
+                                       help_text="Calificación general (opcional; las individuales van por participante)")
+    requiere_calificacion = models.BooleanField(
+        default=True, help_text="Si no aplica, solo se registra asistencia/nombre y evidencia")
+    calificacion_minima = models.DecimalField(
+        max_digits=5, decimal_places=2, default=70, help_text="Mínima para aprobar")
 
     class Meta:
         ordering = ["-fecha"]
+
+
+class ParticipanteCapacitacion(models.Model):
+    """Participante de una capacitación con seguimiento individual.
+
+    Contempla todos los casos:
+      - Empleado real de RH (FK) o participante externo por nombre libre.
+      - Con calificación o solo asistencia (cuando el curso no la requiere).
+      - Evidencia/constancia individual (archivo) y estado por persona.
+    """
+    ESTADOS = [
+        ("INSCRITO", "Inscrito"), ("ASISTIO", "Asistió"),
+        ("APROBADO", "Aprobado"), ("NO_APROBADO", "No aprobado"), ("AUSENTE", "Ausente"),
+    ]
+    capacitacion = models.ForeignKey(
+        Capacitacion, on_delete=models.CASCADE, related_name="participantes_lista")
+    empleado = models.ForeignKey(
+        "rh.Empleado", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="participaciones_capacitacion",
+        help_text="Empleado de RH (opcional si es externo)")
+    nombre = models.CharField(
+        max_length=200, blank=True, help_text="Nombre del participante (si no es empleado de RH)")
+    calificacion = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    estado = models.CharField(max_length=12, choices=ESTADOS, default="INSCRITO")
+    intentos = models.PositiveSmallIntegerField(
+        default=1, help_text="Número de veces que ha presentado el curso")
+    reprogramado = models.BooleanField(
+        default=False, help_text="True si este reprobado ya fue movido a otra edición del curso")
+    evidencia = models.FileField(upload_to="sgc/capacitaciones/", blank=True, null=True,
+                                 help_text="Constancia / evidencia individual")
+    evidencia_nombre = models.CharField(max_length=200, blank=True)
+    observaciones = models.CharField(max_length=300, blank=True)
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["nombre", "id"]
+
+    @property
+    def nombre_display(self) -> str:
+        if self.empleado_id:
+            return f"{self.empleado.nombre} {self.empleado.apellido}".strip()
+        return self.nombre or "—"
+
+    def evaluar_estado(self, minima):
+        """Calcula APROBADO/NO_APROBADO si hay calificación y el curso la requiere."""
+        if self.calificacion is None:
+            return
+        self.estado = "APROBADO" if float(self.calificacion) >= float(minima or 0) else "NO_APROBADO"
 
 
 # ── 10. Control de equipos (calibraciones) ──────────────────────────────────
@@ -282,6 +351,14 @@ class EvaluacionProveedor(models.Model):
     servicio = models.PositiveSmallIntegerField(default=0, help_text="0-100")
     documentacion = models.PositiveSmallIntegerField(default=0, help_text="0-100")
     comentarios = models.TextField(blank=True)
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="evaluaciones_proveedor_asignadas", help_text="Evaluador responsable")
+    plan_mejora = models.TextField(blank=True, help_text="Plan de mejora acordado con el proveedor")
+    estado = models.CharField(
+        max_length=12,
+        choices=[("BORRADOR", "Borrador"), ("EVALUADO", "Evaluado"), ("SEGUIMIENTO", "En seguimiento"), ("CERRADO", "Cerrado")],
+        default="EVALUADO")
     fecha = models.DateField(auto_now_add=True)
 
     class Meta:
@@ -309,6 +386,10 @@ class Queja(models.Model):
     respuesta = models.TextField(blank=True)
     satisfaccion = models.PositiveSmallIntegerField(null=True, blank=True, help_text="1-5")
     estado = models.CharField(max_length=12, choices=ESTADOS, default="ABIERTA")
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="quejas_asignadas", help_text="Responsable de atender la queja")
+    fecha_compromiso = models.DateField(null=True, blank=True, help_text="Fecha objetivo de respuesta")
     no_conformidad = models.ForeignKey(NoConformidad, on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
@@ -401,6 +482,9 @@ class ElementoContexto(models.Model):
     tipo = models.CharField(max_length=1, choices=TIPOS)
     descripcion = models.CharField(max_length=400)
     estrategia = models.TextField(blank=True, help_text="Cómo se aprovecha/aborda")
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="contexto_asignado", help_text="Responsable de la estrategia")
 
     class Meta:
         ordering = ["tipo", "id"]
@@ -849,3 +933,396 @@ class MedicionKPI(models.Model):
     class Meta:
         ordering = ["fecha"]
         unique_together = [("kpi", "fecha")]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CLÁUSULA 8.7 · CONTROL DE SALIDAS NO CONFORMES
+# (producto/servicio que no cumple, distinto de una No Conformidad del sistema)
+# ═════════════════════════════════════════════════════════════════════════════
+class SalidaNoConforme(models.Model):
+    """Registro de un producto/servicio no conforme detectado y su disposición.
+
+    ISO 9001 8.7: la organización debe identificar y controlar las salidas que no
+    cumplen para prevenir su uso o entrega no intencionada, y tomar acciones de
+    disposición (corregir, segregar, devolver, concesión, etc.)."""
+    ORIGENES = [
+        ("RECEPCION", "Recepción / entrada"),
+        ("PROCESO", "Durante el proceso"),
+        ("FINAL", "Inspección final"),
+        ("CLIENTE", "Detectado por el cliente"),
+        ("AUDITORIA", "Auditoría"),
+    ]
+    DISPOSICIONES = [
+        ("CORRECCION", "Corrección / reproceso"),
+        ("SEGREGACION", "Segregación / contención"),
+        ("DEVOLUCION", "Devolución al proveedor"),
+        ("CONCESION", "Aceptación bajo concesión"),
+        ("DESECHO", "Desecho / scrap"),
+        ("RECLASIFICACION", "Reclasificación"),
+    ]
+    ESTADOS = [
+        ("ABIERTA", "Abierta"),
+        ("EN_TRATAMIENTO", "En tratamiento"),
+        ("CERRADA", "Cerrada"),
+    ]
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="salidas_no_conformes")
+    folio = models.CharField(max_length=30, blank=True)
+    descripcion = models.TextField(help_text="Qué producto/servicio y por qué no cumple")
+    origen = models.CharField(max_length=12, choices=ORIGENES, default="PROCESO")
+    proceso_ref = models.ForeignKey(
+        "Proceso", on_delete=models.SET_NULL, null=True, blank=True, related_name="salidas_no_conformes")
+    cantidad = models.CharField(max_length=60, blank=True, help_text="p.ej. 12 piezas, 3 servicios")
+    requisito_incumplido = models.CharField(max_length=300, blank=True)
+    disposicion = models.CharField(max_length=15, choices=DISPOSICIONES, default="CORRECCION")
+    autorizo_concesion = models.CharField(
+        max_length=200, blank=True, help_text="Quién autorizó (si la disposición es concesión)")
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="salidas_nc_asignadas", help_text="Responsable del tratamiento")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="salidas_nc_creadas")
+    estado = models.CharField(max_length=15, choices=ESTADOS, default="ABIERTA")
+    fecha_deteccion = models.DateField(null=True, blank=True)
+    fecha_cierre = models.DateField(null=True, blank=True)
+    # Si el problema es recurrente/grave, se eleva a una No Conformidad del sistema.
+    no_conformidad = models.ForeignKey(
+        NoConformidad, on_delete=models.SET_NULL, null=True, blank=True, related_name="salidas_origen")
+    creado = models.DateTimeField(auto_now_add=True)
+    actualizado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-creado"]
+
+    def save(self, *args, **kwargs):
+        if not self.folio and self.empresa_id:
+            self.folio = siguiente_folio(SalidaNoConforme, self.empresa, "SNC")
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.folio} · {self.descripcion[:40]}"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ECOSISTEMA DE CERTIFICACIÓN — plantillas, roadmap, programa de auditorías,
+# registros, gestión de cambios, comunicación y conocimiento organizacional.
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ── #1 · Biblioteca de plantillas ISO (acelera la documentación 7.5) ─────────
+class PlantillaDocumento(models.Model):
+    """Plantilla ISO lista para usar. Globales (empresa null) o propias.
+
+    Permite a cualquier empresa generar su documentación base con un clic en
+    vez de redactar desde cero — el mayor acelerador de la certificación."""
+    CATEGORIAS = [
+        ("POLITICA", "Política"), ("MANUAL", "Manual"), ("PROCEDIMIENTO", "Procedimiento"),
+        ("INSTRUCTIVO", "Instructivo"), ("FORMATO", "Formato"), ("PLAN", "Plan"),
+        ("MATRIZ", "Matriz"), ("OTRO", "Otro"),
+    ]
+    empresa = models.ForeignKey(
+        Empresa, on_delete=models.CASCADE, related_name="plantillas_sgc",
+        null=True, blank=True, help_text="Null = plantilla global del sistema")
+    codigo = models.CharField(max_length=40, blank=True)
+    nombre = models.CharField(max_length=200)
+    categoria = models.CharField(max_length=15, choices=CATEGORIAS, default="PROCEDIMIENTO")
+    clausula = models.CharField(max_length=20, blank=True, help_text="Cláusula ISO que cubre")
+    descripcion = models.CharField(max_length=300, blank=True)
+    # Contenido con marcadores tipo {{empresa}} que se sustituyen al generar.
+    contenido = models.TextField(help_text="Cuerpo del documento, admite {{empresa}}, {{fecha}}, etc.")
+    obligatoria = models.BooleanField(default=False, help_text="Documento exigido por la norma")
+    orden = models.PositiveSmallIntegerField(default=100)
+    activa = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["orden", "nombre"]
+
+    def __str__(self) -> str:
+        return f"{self.nombre} ({self.get_categoria_display()})"
+
+
+# ── #2 · Roadmap de certificación guiado ─────────────────────────────────────
+class HitoCertificacion(models.Model):
+    """Hito/tarea dentro de una fase del camino a la certificación.
+
+    El roadmap consta de fases fijas (diagnóstico → documentación → ... →
+    certificación); cada empresa avanza marcando sus hitos como completados."""
+    FASES = [
+        ("DIAGNOSTICO", "1. Diagnóstico inicial"),
+        ("PLANEACION", "2. Planeación y liderazgo"),
+        ("DOCUMENTACION", "3. Documentación del SGC"),
+        ("IMPLEMENTACION", "4. Implementación"),
+        ("MEDICION", "5. Medición y seguimiento"),
+        ("AUDITORIA_INTERNA", "6. Auditoría interna"),
+        ("REVISION_DIRECCION", "7. Revisión por la dirección"),
+        ("PREAUDITORIA", "8. Pre-auditoría / acciones"),
+        ("CERTIFICACION", "9. Auditoría de certificación"),
+    ]
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="hitos_certificacion")
+    fase = models.CharField(max_length=20, choices=FASES)
+    titulo = models.CharField(max_length=200)
+    descripcion = models.CharField(max_length=400, blank=True)
+    clausula = models.CharField(max_length=20, blank=True)
+    # Ruta interna recomendada para completar el hito (deep-link).
+    ruta = models.CharField(max_length=120, blank=True)
+    orden = models.PositiveSmallIntegerField(default=100)
+    completado = models.BooleanField(default=False)
+    fecha_completado = models.DateField(null=True, blank=True)
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="hitos_certificacion_asignados")
+
+    class Meta:
+        ordering = ["orden", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.get_fase_display()} · {self.titulo}"
+
+
+# ── #4 · Programa anual de auditorías + checklist reutilizable (9.2) ──────────
+class ProgramaAuditoria(models.Model):
+    """Programa anual de auditorías internas (ISO 9.2.1)."""
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="programas_auditoria")
+    anio = models.PositiveIntegerField()
+    nombre = models.CharField(max_length=200, blank=True)
+    objetivo = models.TextField(blank=True)
+    alcance = models.TextField(blank=True)
+    criterios = models.CharField(max_length=300, blank=True, help_text="Normas/criterios de referencia")
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="programas_auditoria_asignados")
+    aprobado = models.BooleanField(default=False)
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-anio"]
+        unique_together = [("empresa", "anio")]
+
+    def __str__(self) -> str:
+        return f"Programa de auditorías {self.anio}"
+
+
+class PlantillaChecklist(models.Model):
+    """Lista de verificación reutilizable para auditar (preguntas por cláusula)."""
+    empresa = models.ForeignKey(
+        Empresa, on_delete=models.CASCADE, related_name="checklists_auditoria",
+        null=True, blank=True, help_text="Null = checklist global")
+    nombre = models.CharField(max_length=200)
+    descripcion = models.CharField(max_length=300, blank=True)
+    norma = models.ForeignKey(Norma, on_delete=models.SET_NULL, null=True, blank=True)
+    activa = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["nombre"]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class ItemChecklist(models.Model):
+    """Pregunta/criterio de una lista de verificación."""
+    checklist = models.ForeignKey(PlantillaChecklist, on_delete=models.CASCADE, related_name="items")
+    clausula = models.CharField(max_length=20, blank=True)
+    pregunta = models.TextField()
+    guia = models.CharField(max_length=400, blank=True, help_text="Qué evidencia buscar")
+    orden = models.PositiveSmallIntegerField(default=100)
+
+    class Meta:
+        ordering = ["orden", "id"]
+
+
+# ── #5 · Gestión de registros con retención (7.5) ────────────────────────────
+class RegistroCalidad(models.Model):
+    """Lista maestra de registros (evidencia retenida): qué se conserva, dónde,
+    cuánto tiempo y cómo se dispone. ISO 9001 7.5.3."""
+    SOPORTES = [("DIGITAL", "Digital"), ("FISICO", "Físico"), ("AMBOS", "Ambos")]
+    DISPOSICIONES = [("ELIMINAR", "Eliminar"), ("ARCHIVAR", "Archivar"), ("CONSERVAR", "Conservar indefinidamente")]
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="registros_calidad")
+    codigo = models.CharField(max_length=40, blank=True)
+    nombre = models.CharField(max_length=200)
+    proceso = models.CharField(max_length=150, blank=True)
+    proceso_ref = models.ForeignKey(
+        "Proceso", on_delete=models.SET_NULL, null=True, blank=True, related_name="registros")
+    soporte = models.CharField(max_length=10, choices=SOPORTES, default="DIGITAL")
+    ubicacion = models.CharField(max_length=200, blank=True, help_text="Dónde se almacena")
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="registros_asignados")
+    retencion_meses = models.PositiveSmallIntegerField(default=36, help_text="Tiempo de retención (meses)")
+    disposicion = models.CharField(max_length=12, choices=DISPOSICIONES, default="ARCHIVAR")
+    activo = models.BooleanField(default=True)
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["codigo", "nombre"]
+
+    def __str__(self) -> str:
+        return f"{self.codigo} · {self.nombre}"
+
+
+# ── #6 · Gestión de cambios (6.3) ────────────────────────────────────────────
+class GestionCambio(models.Model):
+    """Planificación de cambios del SGC (ISO 9001 6.3): por qué, consecuencias,
+    recursos, responsables y autorización."""
+    ESTADOS = [("PROPUESTO", "Propuesto"), ("APROBADO", "Aprobado"),
+               ("EN_PROCESO", "En proceso"), ("IMPLEMENTADO", "Implementado"), ("RECHAZADO", "Rechazado")]
+    TIPOS = [
+        ("PROCESO", "Proceso"), ("DOCUMENTO", "Documento"), ("INFRAESTRUCTURA", "Infraestructura"),
+        ("PROVEEDOR", "Proveedor"), ("ORGANIZACIONAL", "Organizacional"), ("TECNOLOGICO", "Tecnológico"),
+        ("PRODUCTO", "Producto/Servicio"), ("OTRO", "Otro"),
+    ]
+    PRIORIDADES = [("BAJA", "Baja"), ("MEDIA", "Media"), ("ALTA", "Alta"), ("CRITICA", "Crítica")]
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="cambios_sgc")
+    folio = models.CharField(max_length=30, blank=True)
+    titulo = models.CharField(max_length=200)
+    descripcion = models.TextField(help_text="En qué consiste el cambio")
+    tipo = models.CharField(max_length=16, choices=TIPOS, default="PROCESO",
+                            help_text="Categoría del cambio (para análisis y trazabilidad)")
+    prioridad = models.CharField(max_length=8, choices=PRIORIDADES, default="MEDIA")
+    justificacion = models.TextField(blank=True, help_text="Propósito y motivo del cambio")
+    consecuencias = models.TextField(blank=True, help_text="Consecuencias potenciales")
+    recursos = models.TextField(blank=True, help_text="Recursos necesarios")
+    impacto_integridad = models.CharField(
+        max_length=300, blank=True, help_text="Cómo se preserva la integridad del SGC")
+    # Evaluación de riesgo del cambio (matriz 5×5): 0 = no evaluado.
+    riesgo_probabilidad = models.PositiveSmallIntegerField(default=0, help_text="Probabilidad 1-5 (0 = sin evaluar)")
+    riesgo_impacto = models.PositiveSmallIntegerField(default=0, help_text="Impacto 1-5 (0 = sin evaluar)")
+    # Plan de implementación: lista de tareas [{"texto": str, "hecho": bool}].
+    plan_accion = models.JSONField(default=list, blank=True)
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="cambios_asignados")
+    autorizado_por = models.CharField(max_length=150, blank=True)
+    fecha_objetivo = models.DateField(null=True, blank=True)
+    fecha_implementacion = models.DateField(null=True, blank=True, help_text="Fecha real de implementación")
+    estado = models.CharField(max_length=12, choices=ESTADOS, default="PROPUESTO")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="cambios_creados")
+    creado = models.DateTimeField(auto_now_add=True)
+    actualizado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-creado"]
+
+    def save(self, *args, **kwargs):
+        if not self.folio and self.empresa_id:
+            self.folio = siguiente_folio(GestionCambio, self.empresa, "CAM")
+        super().save(*args, **kwargs)
+
+    @property
+    def riesgo_score(self) -> int:
+        return int(self.riesgo_probabilidad or 0) * int(self.riesgo_impacto or 0)
+
+    @property
+    def nivel_riesgo(self) -> str:
+        s = self.riesgo_score
+        if s <= 0:
+            return "SIN_EVALUAR"
+        if s <= 4:
+            return "BAJO"
+        if s <= 9:
+            return "MEDIO"
+        if s <= 14:
+            return "ALTO"
+        return "EXTREMO"
+
+    @property
+    def progreso_plan(self) -> int:
+        tareas = self.plan_accion or []
+        if not isinstance(tareas, list) or not tareas:
+            return 0
+        hechas = sum(1 for t in tareas if isinstance(t, dict) and t.get("hecho"))
+        return round(hechas / len(tareas) * 100)
+
+    def __str__(self) -> str:
+        return f"{self.folio} · {self.titulo}"
+
+
+# ── #6 · Comunicación (7.4) ──────────────────────────────────────────────────
+class ComunicacionSGC(models.Model):
+    """Matriz de comunicación (ISO 9001 7.4): qué, cuándo, a quién, cómo y quién."""
+    DIRECCIONES = [("INTERNA", "Interna"), ("EXTERNA", "Externa"), ("AMBAS", "Ambas")]
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="comunicaciones_sgc")
+    que = models.CharField(max_length=250, help_text="Qué se comunica")
+    direccion = models.CharField(max_length=10, choices=DIRECCIONES, default="INTERNA")
+    cuando = models.CharField(max_length=150, blank=True, help_text="Frecuencia / cuándo")
+    a_quien = models.CharField(max_length=250, blank=True, help_text="Audiencia / partes interesadas")
+    como = models.CharField(max_length=200, blank=True, help_text="Canal/medio")
+    responsable_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="comunicaciones_asignadas")
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["que"]
+
+    def __str__(self) -> str:
+        return self.que
+
+
+# ── #6 · Conocimiento organizacional (7.1.6) ─────────────────────────────────
+class ConocimientoOrganizacional(models.Model):
+    """Base de conocimiento y lecciones aprendidas (ISO 9001 7.1.6)."""
+    TIPOS = [("LECCION", "Lección aprendida"), ("MEJOR_PRACTICA", "Mejor práctica"),
+             ("EXPERIENCIA", "Experiencia"), ("FUENTE_EXTERNA", "Fuente externa"), ("OTRO", "Otro")]
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="conocimiento_sgc")
+    titulo = models.CharField(max_length=200)
+    tipo = models.CharField(max_length=15, choices=TIPOS, default="LECCION")
+    area = models.CharField(max_length=150, blank=True, help_text="Proceso/área relacionada")
+    contenido = models.TextField(help_text="Descripción del conocimiento / lección")
+    origen = models.CharField(max_length=200, blank=True, help_text="De dónde proviene (NC, proyecto, etc.)")
+    etiquetas = models.CharField(max_length=300, blank=True)
+    autor_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="conocimiento_aportado")
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado"]
+
+    def __str__(self) -> str:
+        return self.titulo
+
+
+# ── Snapshot histórico de madurez (para tendencias del centro de mando) ──────
+class SnapshotMadurez(models.Model):
+    """Foto periódica de los indicadores clave del SGC, para graficar la
+    evolución de la madurez en el tiempo y proyectar la certificación."""
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="snapshots_madurez")
+    fecha = models.DateField()
+    madurez = models.DecimalField(max_digits=5, decimal_places=1, default=0)
+    cumplimiento_iso = models.DecimalField(max_digits=5, decimal_places=1, default=0)
+    nc_abiertas = models.PositiveIntegerField(default=0)
+    nc_cerradas = models.PositiveIntegerField(default=0)
+    riesgos_altos = models.PositiveIntegerField(default=0)
+    kpis_en_meta = models.PositiveIntegerField(default=0)
+    kpis_total = models.PositiveIntegerField(default=0)
+    objetivos_logrados = models.PositiveIntegerField(default=0)
+    satisfaccion = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    datos = models.JSONField(default=dict, blank=True)
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["fecha"]
+        unique_together = [("empresa", "fecha")]
+
+
+# ── Respuestas del checklist de una auditoría en ejecución (9.2) ─────────────
+class RespuestaChecklistAuditoria(models.Model):
+    """Evaluación de un requisito durante la ejecución de una auditoría en vivo.
+    Permite marcar conforme/no conforme por punto y generar hallazgos al cerrar."""
+    RESULTADOS = [
+        ("CONFORME", "Conforme"), ("NO_CONFORME", "No conforme"),
+        ("OBSERVACION", "Observación"), ("NA", "No aplica"), ("PENDIENTE", "Pendiente"),
+    ]
+    auditoria = models.ForeignKey(Auditoria, on_delete=models.CASCADE, related_name="respuestas_checklist")
+    requisito = models.ForeignKey(RequisitoISO, on_delete=models.SET_NULL, null=True, blank=True)
+    clausula = models.CharField(max_length=20, blank=True)
+    pregunta = models.TextField(blank=True)
+    resultado = models.CharField(max_length=12, choices=RESULTADOS, default="PENDIENTE")
+    nota = models.TextField(blank=True, help_text="Evidencia/observación del auditor")
+    actualizado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["clausula", "id"]
+        unique_together = [("auditoria", "requisito")]

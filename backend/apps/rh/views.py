@@ -108,6 +108,144 @@ class EmpleadoViewSet(_EmpresaScoped):
     filterset_fields = ["empresa", "puesto", "activo"]
     search_fields = ["nombre", "numero_empleado", "rfc", "curp"]
 
+    def perform_create(self, serializer):
+        e = serializer.save()
+        from apps.carta_porte.sync_rh import asegurar_operador_de_empleado
+        asegurar_operador_de_empleado(e)
+
+    def perform_update(self, serializer):
+        e = serializer.save()
+        from apps.carta_porte.sync_rh import asegurar_operador_de_empleado
+        asegurar_operador_de_empleado(e)
+
+    @action(detail=False, methods=["get"], url_path="usuarios-vinculables")
+    def usuarios_vinculables(self, request):
+        """Usuarios del sistema que pueden vincularse a un empleado (miembros de
+        la empresa). Indica si ya están vinculados a algún empleado."""
+        from django.contrib.auth import get_user_model
+        from apps.core.models import UsuarioEmpresa
+        emp_param = request.query_params.get("empresa")
+        ids = list(request.user.empresas.filter(activo=True).values_list("empresa_id", flat=True)) \
+            if not request.user.is_superuser else None
+        qs = UsuarioEmpresa.objects.filter(activo=True).select_related("user")
+        if emp_param:
+            qs = qs.filter(empresa_id=emp_param)
+        elif ids is not None:
+            qs = qs.filter(empresa_id__in=ids)
+        User = get_user_model()
+        vinculados = set(Empleado.objects.exclude(user_sistema=None).values_list("user_sistema_id", flat=True))
+        vistos, out = set(), []
+        for ue in qs:
+            u = ue.user
+            if u.id in vistos:
+                continue
+            vistos.add(u.id)
+            out.append({
+                "id": u.id, "username": u.username,
+                "nombre": (u.get_full_name() or "").strip() or u.username,
+                "email": u.email, "rol": ue.rol,
+                "ya_vinculado": u.id in vinculados,
+            })
+        out.sort(key=lambda x: x["nombre"].lower())
+        return Response(out)
+
+    @action(detail=False, methods=["get"], url_path="mi-portal")
+    def mi_portal(self, request):
+        """Portal de autoservicio del empleado: reúne los datos del empleado
+        vinculado al usuario logueado (préstamos, vacaciones, solicitudes/permisos
+        y capacitaciones), para mostrarlos en su perfil."""
+        emp = Empleado.objects.select_related("puesto", "sucursal", "empresa").filter(
+            user_sistema=request.user).first()
+        if not emp:
+            return Response({"vinculado": False,
+                             "detail": "Tu usuario no está vinculado a un empleado de RH."})
+
+        hoy = date.today()
+
+        # Préstamos
+        prestamos = list(Prestamo.objects.filter(empleado=emp).order_by("-fecha_otorgamiento"))
+        prestamos_data = PrestamoSerializer(prestamos, many=True).data
+        saldo_prestamos = sum(float(p.saldo or 0) for p in prestamos if str(p.estado).upper() == "ACTIVO")
+
+        # Vacaciones
+        vacaciones = list(Vacacion.objects.filter(empleado=emp).order_by("-fecha_inicio"))
+        vac_data = VacacionSerializer(vacaciones, many=True).data
+        dias_tomados = sum(int(v.dias or 0) for v in vacaciones if v.estado in ("APROB", "TOMADA"))
+        # Días que corresponden por ley (LFT) según antigüedad.
+        anios = max(0, (hoy - emp.fecha_ingreso).days // 365) if emp.fecha_ingreso else 0
+        tabla_lft = [12, 14, 16, 18, 20]
+        if anios <= 0:
+            dias_derecho = 0
+        elif anios <= 5:
+            dias_derecho = tabla_lft[min(anios, 5) - 1]
+        else:
+            dias_derecho = 22 + ((anios - 5) // 5) * 2
+        dias_disponibles = max(0, dias_derecho - dias_tomados)
+
+        # Solicitudes / permisos
+        solicitudes = list(SolicitudRH.objects.filter(empleado=emp)
+                           .select_related("tipo").order_by("-fecha_solicitud")[:50])
+        sol_data = SolicitudRHSerializer(solicitudes, many=True, context={"request": request}).data
+
+        # Tipos de solicitud disponibles (para que el empleado solicite desde su portal).
+        tipos = TipoSolicitudRH.objects.filter(empresa=emp.empresa, activo=True).order_by("categoria", "nombre")
+        tipos_data = TipoSolicitudRHSerializer(tipos, many=True).data
+
+        # Capacitaciones donde está inscrito. Se prioriza la participación
+        # individual (calificación/estado/evidencia por persona); si no existe,
+        # se usa el vínculo M2M simple.
+        partis = {p.capacitacion_id: p for p in
+                  emp.participaciones_capacitacion.select_related("capacitacion").all()}
+        caps = emp.capacitaciones_sgc.all().order_by("-fecha")
+        caps_data = []
+        for c in caps:
+            p = partis.get(c.id)
+            ev_url = None
+            if p and p.evidencia:
+                try:
+                    ev_url = p.evidencia.url
+                except Exception:
+                    ev_url = None
+            mi_estado_raw = p.estado if p else None
+            puede_constancia = bool(p and (mi_estado_raw == "APROBADO"
+                                           or (not c.requiere_calificacion and mi_estado_raw == "ASISTIO")))
+            caps_data.append({
+                "id": c.id, "curso": c.curso, "descripcion": c.descripcion,
+                "instructor": c.instructor, "estado": c.estado,
+                "fecha": c.fecha, "fecha_vencimiento": c.fecha_vencimiento,
+                "calificacion": float(p.calificacion) if (p and p.calificacion is not None)
+                                else (float(c.calificacion) if c.calificacion is not None else None),
+                "mi_estado": p.get_estado_display() if p else None,
+                "participante_id": p.id if p else None,
+                "puede_constancia": puede_constancia,
+                "evidencia_url": ev_url,
+                "vencida": bool(c.fecha_vencimiento and c.fecha_vencimiento < hoy),
+            })
+
+        return Response({
+            "vinculado": True,
+            "empleado": EmpleadoSerializer(emp).data,
+            "empleado_id": emp.id,
+            "empresa_id": emp.empresa_id,
+            "tipos_solicitud": tipos_data,
+            "antiguedad_anios": anios,
+            "prestamos": prestamos_data,
+            "saldo_prestamos": round(saldo_prestamos, 2),
+            "vacaciones": vac_data,
+            "vacaciones_resumen": {
+                "dias_derecho": dias_derecho, "dias_tomados": dias_tomados,
+                "dias_disponibles": dias_disponibles,
+            },
+            "solicitudes": sol_data,
+            "capacitaciones": caps_data,
+            "resumen": {
+                "prestamos_activos": sum(1 for p in prestamos if str(p.estado).upper() == "ACTIVO"),
+                "solicitudes_pendientes": sum(1 for s in solicitudes if s.estado == "PEND"),
+                "capacitaciones_total": len(caps_data),
+                "capacitaciones_vencidas": sum(1 for c in caps_data if c["vencida"]),
+            },
+        })
+
 
 class VacacionViewSet(viewsets.ModelViewSet):
     queryset = Vacacion.objects.select_related("empleado")

@@ -76,7 +76,7 @@ export default function AdminUsuariosPage() {
               <tr>
                 <th className="px-6 py-3">Usuario</th>
                 <th className="px-6 py-3">Email</th>
-                <th className="px-6 py-3">Empresas</th>
+                <th className="px-6 py-3">Rol</th>
                 <th className="px-6 py-3">Estado</th>
               </tr>
             </thead>
@@ -89,12 +89,17 @@ export default function AdminUsuariosPage() {
                   </td>
                   <td className={`px-6 py-3 ${t.textSecondary}`}>{u.email || "-"}</td>
                   <td className="px-6 py-3">
-                    {u.empresas.map((e) => (
-                      <span key={e.id} className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 mr-1">
-                        {e.nombre} · {e.rol}
+                    {u.is_superuser ? (
+                      <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300">
+                        Super Admin
                       </span>
-                    ))}
-                    {!u.empresas.length && <span className={t.textTertiary}>-</span>}
+                    ) : u.empresas[0]?.rol ? (
+                      <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300">
+                        {u.empresas[0].rol}
+                      </span>
+                    ) : (
+                      <span className={t.textTertiary}>-</span>
+                    )}
                   </td>
                   <td className="px-6 py-3">
                     <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.is_active ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>

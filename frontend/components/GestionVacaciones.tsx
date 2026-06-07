@@ -110,7 +110,7 @@ export default function GestionVacaciones() {
       const p: Record<string, string> = { page: String(page), page_size: String(PAGE_SIZE) };
       if (estadoFilter) p.estado = estadoFilter;
       const res = await api.getVacacionesRH(p);
-      setData(res);
+      setData(res as unknown as { results: Vacacion[]; count: number });
     } catch {
       setError(true);
     } finally {

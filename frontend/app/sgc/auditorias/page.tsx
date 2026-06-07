@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, ClipboardCheck, Plus, RefreshCw, Trash2, X, Search, CalendarClock,
-  AlertTriangle, FileWarning, CheckCircle2, Lightbulb, Link2,
+  AlertTriangle, FileWarning, CheckCircle2, Lightbulb, Link2, PlayCircle,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -71,16 +71,28 @@ export default function AuditoriasPage() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push("/sgc")} className={`p-2 rounded-xl border ${isDarkMode ? "border-white/[0.08]" : "border-slate-200"}`}><ArrowLeft className={`w-4 h-4 ${theme.textSecondary}`} /></button>
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-md bg-gradient-to-br from-emerald-500 to-teal-600"><ClipboardCheck className="w-6 h-6 text-white" /></div>
-          <div><h1 className={`text-2xl font-black tracking-tight ${theme.textPrimary}`}>Auditorías Internas</h1><p className={`text-sm ${theme.textSecondary}`}>ISO 9001 · 9.2 — programa, hallazgos y seguimiento.</p></div>
-        </div>
-        <div className="flex items-center gap-2">
-          <CampanaNotificaciones />
-          <button onClick={load} className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border ${isDarkMode ? "bg-white/[0.04] border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /></button>
-          <button onClick={() => setEdit({})} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-emerald-500 to-teal-600"><Plus className="w-4 h-4" /> Nueva auditoría</button>
+      <div className={`relative overflow-hidden rounded-3xl border ${card}`}>
+        <div className="absolute inset-0 opacity-[0.08] pointer-events-none"
+          style={{ background: "radial-gradient(circle at 10% 20%, #10B981 0, transparent 40%), radial-gradient(circle at 90% 80%, #14B8A6 0, transparent 42%)" }} />
+        <div className="relative p-6">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <button onClick={() => router.push("/sgc")} className={`p-2 rounded-xl border ${isDarkMode ? "border-white/[0.08] hover:bg-white/[0.05]" : "border-slate-200 hover:bg-slate-50"} transition`}><ArrowLeft className={`w-4 h-4 ${theme.textSecondary}`} /></button>
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg bg-gradient-to-br from-emerald-500 via-teal-500 to-teal-600"><ClipboardCheck className="w-7 h-7 text-white" /></div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className={`text-2xl lg:text-3xl font-black tracking-tight ${theme.textPrimary}`}>Auditorías Internas</h1>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full text-white bg-gradient-to-r from-emerald-500 to-teal-600">ISO 9.2</span>
+                </div>
+                <p className={`text-sm mt-0.5 max-w-xl ${theme.textSecondary}`}>Programa anual de auditoría, hallazgos por cláusula y conversión a no conformidades.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <CampanaNotificaciones />
+              <button onClick={load} className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border ${isDarkMode ? "bg-white/[0.04] border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /></button>
+              <button onClick={() => setEdit({})} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-emerald-500 to-teal-600 shadow-md hover:shadow-lg transition"><Plus className="w-4 h-4" /> Nueva auditoría</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -123,7 +135,7 @@ export default function AuditoriasPage() {
             halls.forEach((h: any) => { conteo[h.tipo] = (conteo[h.tipo] || 0) + 1; });
             const vencida = a.estado === "PROGRAMADA" && a.fecha_programada && new Date(a.fecha_programada) < new Date();
             return (
-              <button key={a.id} onClick={() => setEdit(a)} className={`text-left rounded-2xl border p-4 transition hover:shadow-lg ${card} ${vencida ? "ring-1 ring-rose-500/40" : ""}`}>
+              <div key={a.id} onClick={() => setEdit(a)} className={`text-left rounded-2xl border p-4 transition hover:shadow-lg cursor-pointer ${card} ${vencida ? "ring-1 ring-rose-500/40" : ""}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <h3 className={`text-sm font-black ${theme.textPrimary}`}>{a.titulo}</h3>
@@ -148,7 +160,16 @@ export default function AuditoriasPage() {
                     ))}
                   {halls.some((h: any) => h.no_conformidad) && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-rose-500"><Link2 className="w-3 h-3" /> {halls.filter((h: any) => h.no_conformidad).length} NC</span>}
                 </div>
-              </button>
+                {/* Ejecutar checklist en vivo */}
+                <div className="mt-3 pt-3 border-t flex justify-end" style={{ borderColor: isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(148,163,184,0.25)" }}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); router.push(`/sgc/auditorias/${a.id}`); }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-emerald-500 to-teal-600 shadow-sm hover:shadow-md transition"
+                  >
+                    <PlayCircle className="w-3.5 h-3.5" /> Ejecutar checklist en vivo
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>

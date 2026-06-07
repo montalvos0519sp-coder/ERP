@@ -40,8 +40,11 @@ const nextConfig: NextConfig = {
       // Forzamos el slash final en el destino: Django (APPEND_SLASH) exige rutas
       // con / al final, y el proxy de Next lo descarta del :path*.
       { source: "/api/:path*", destination: "http://127.0.0.1:8000/api/:path*/" },
-      // El módulo RH usa el montaje legacy /rh/... (no /api/rh). Lo proxeamos igual.
-      { source: "/rh/:path*", destination: "http://127.0.0.1:8000/rh/:path*/" },
+      // RH expone una API legacy en /rh/api/... — SOLO eso se proxea al backend.
+      // OJO: el frontend tiene sus PROPIAS páginas en /rh/... (empleados, etc.),
+      // así que el patrón debe ser /rh/api/ y no /rh/ (si no, Next reenvía las
+      // páginas del frontend a Django y devuelven 404).
+      { source: "/rh/api/:path*", destination: "http://127.0.0.1:8000/rh/api/:path*/" },
       // Media y estáticos de Django (p.ej. páginas server-rendered de RH). Sin
       // slash final porque son archivos con extensión.
       { source: "/media/:path*", destination: "http://127.0.0.1:8000/media/:path*" },

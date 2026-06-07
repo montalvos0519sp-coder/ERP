@@ -88,7 +88,7 @@ export default function GestionViajes() {
     try {
       const p: Record<string, string> = { page: String(page), page_size: String(PAGE_SIZE), ...buildFilters() };
       const res = await api.getViajes(p);
-      setData(res);
+      setData(res as unknown as { results: Viaje[]; count: number });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "No se pudo cargar la bitácora.");
     } finally {

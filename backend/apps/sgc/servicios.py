@@ -35,6 +35,8 @@ MODELOS_COLABORABLES = {
     "parte_interesada": ("sgc", "parteinteresada"),
     "proceso": ("sgc", "proceso"),
     "tarea_implementacion": ("sgc", "tareaimplementacion"),
+    "contexto": ("sgc", "elementocontexto"),
+    "salida_no_conforme": ("sgc", "salidanoconforme"),
 }
 
 # Ruta del frontend por clave de modelo (para deep-links de notificaciones).
@@ -52,6 +54,9 @@ RUTA_FRONTEND = {
     "revision_direccion": "/sgc/revision-direccion",
     "proceso": "/sgc/procesos",
     "tarea_implementacion": "/sgc/implementacion",
+    "contexto": "/sgc/contexto",
+    "salida_no_conforme": "/sgc/salidas-no-conformes",
+    "evaluacion_proveedor": "/sgc/evaluacion-proveedores",
 }
 
 _MENCION_RE = re.compile(r"@([A-Za-z0-9_.\-]{2,40})")
@@ -133,7 +138,40 @@ def notificar(destinatarios, empresa, actor, tipo, titulo, mensaje="", obj=None,
         ))
     if creadas:
         NotificacionCalidad.objects.bulk_create(creadas)
+        enviar_correo_notificaciones(creadas)
     return creadas
+
+
+def enviar_correo_notificaciones(notificaciones):
+    """Envía un correo por cada notificación recién creada (si está habilitado y
+    el usuario tiene email). Nunca rompe el flujo si el correo falla."""
+    from django.conf import settings
+    if not getattr(settings, "SGC_EMAIL_NOTIFICACIONES", False):
+        return
+    base = getattr(settings, "FRONTEND_BASE_URL", "")
+    from django.core.mail import send_mail
+    for n in notificaciones:
+        dest = getattr(n.destinatario, "email", "") or ""
+        if not dest:
+            continue
+        link = f"{base}{n.url}" if n.url and n.url.startswith("/") else (n.url or base)
+        cuerpo = (
+            f"Hola {nombre_usuario(n.destinatario)},\n\n"
+            f"{n.titulo}\n\n"
+            f"{n.mensaje or ''}\n\n"
+            f"Ábrelo en el sistema: {link}\n\n"
+            f"— Sistema de Gestión de Calidad"
+        )
+        try:
+            send_mail(
+                subject=f"[Calidad] {n.titulo}"[:120],
+                message=cuerpo,
+                from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+                recipient_list=[dest],
+                fail_silently=True,
+            )
+        except Exception:
+            pass
 
 
 def extraer_menciones(texto: str, empresa):

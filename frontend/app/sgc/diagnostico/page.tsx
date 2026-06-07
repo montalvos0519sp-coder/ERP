@@ -79,9 +79,14 @@ export default function DiagnosticoPage() {
 
   // Métricas
   const { avance, evaluados, brechas } = useMemo(() => {
-    const evs = reqs.map((r) => evalMap[r.id]).filter((e) => e && e.cumple && e.cumple !== "NA");
+    // Requisitos que aplican = todos los de la norma menos los marcados "No aplica".
+    const aplicables = reqs.filter((r) => evalMap[r.id]?.cumple !== "NA");
+    // Evaluados = los que ya tienen un nivel (SI/PARCIAL/NO).
+    const evs = aplicables.map((r) => evalMap[r.id]).filter((e) => e && e.cumple);
     const suma = evs.reduce((s, e) => s + (PUNTOS[e.cumple] ?? 0), 0);
-    const av = evs.length ? Math.round(suma / evs.length) : 0;
+    // El avance se mide sobre TODOS los requisitos aplicables: lo no evaluado
+    // todavía no cumple, así que cuenta como 0 (refleja el avance real del SGC).
+    const av = aplicables.length ? Math.round(suma / aplicables.length) : 0;
     const br = reqs.filter((r) => { const e = evalMap[r.id]; return e && (e.cumple === "NO" || e.cumple === "PARCIAL"); });
     return { avance: av, evaluados: evs.length, brechas: br };
   }, [reqs, evalMap]);
@@ -90,22 +95,25 @@ export default function DiagnosticoPage() {
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push("/sgc")} className={`p-2 rounded-xl border ${isDarkMode ? "border-white/[0.08]" : "border-slate-200"}`}>
-            <ArrowLeft className={`w-4 h-4 ${theme.textSecondary}`} />
-          </button>
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-md bg-gradient-to-br from-sky-500 to-cyan-600">
-            <FileSearch className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className={`text-2xl font-black tracking-tight ${theme.textPrimary}`}>Diagnóstico ISO 9001 (Gap Analysis)</h1>
-            <p className={`text-sm ${theme.textSecondary}`}>Evalúa cada requisito; el sistema calcula el avance y las brechas.</p>
+      <div className={`relative overflow-hidden rounded-3xl border ${card}`}>
+        <div className="absolute inset-0 opacity-[0.08] pointer-events-none"
+          style={{ background: "radial-gradient(circle at 10% 20%, #0EA5E9 0, transparent 40%), radial-gradient(circle at 90% 80%, #06B6D4 0, transparent 42%)" }} />
+        <div className="relative p-6">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <button onClick={() => router.push("/sgc")} className={`p-2 rounded-xl border ${isDarkMode ? "border-white/[0.08] hover:bg-white/[0.05]" : "border-slate-200 hover:bg-slate-50"} transition`}><ArrowLeft className={`w-4 h-4 ${theme.textSecondary}`} /></button>
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg bg-gradient-to-br from-sky-500 via-cyan-500 to-cyan-600"><FileSearch className="w-7 h-7 text-white" /></div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className={`text-2xl lg:text-3xl font-black tracking-tight ${theme.textPrimary}`}>Diagnóstico ISO 9001</h1>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full text-white bg-gradient-to-r from-sky-500 to-cyan-600">Gap Analysis</span>
+                </div>
+                <p className={`text-sm mt-0.5 max-w-xl ${theme.textSecondary}`}>Evalúa cada requisito de la norma; el sistema calcula el avance, detecta brechas y genera el plan de acción.</p>
+              </div>
+            </div>
+            <button onClick={load} className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border ${isDarkMode ? "bg-white/[0.04] border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /></button>
           </div>
         </div>
-        <button onClick={load} className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border ${isDarkMode ? "bg-white/[0.04] border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-        </button>
       </div>
 
       {/* Resumen */}
@@ -116,6 +124,7 @@ export default function DiagnosticoPage() {
           <div className={`h-2.5 rounded-full overflow-hidden mt-2 ${isDarkMode ? "bg-white/[0.06]" : "bg-slate-100"}`}>
             <div className="h-full bg-gradient-to-r from-sky-500 to-cyan-600" style={{ width: `${avance}%` }} />
           </div>
+          <div className={`text-[11px] mt-1.5 ${theme.textTertiary}`}>Sobre el total de requisitos aplicables de la norma</div>
         </div>
         <div className={`rounded-2xl border p-5 ${card} flex flex-col justify-center`}>
           <div className={`text-[11px] uppercase tracking-wider font-bold ${theme.textTertiary}`}>Requisitos evaluados</div>

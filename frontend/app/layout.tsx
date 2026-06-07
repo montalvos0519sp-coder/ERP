@@ -4,7 +4,7 @@ import ClientShell from "@/components/ClientShell";
 
 export const metadata: Metadata = {
   title: "ERP Profesional",
-  description: "Sistema ERP multi-empresa configurable, con facturacion CFDI 4.0 y Carta Porte 3.1",
+  description: "Sistema ERP empresarial, con facturación CFDI 4.0 y Carta Porte 3.1",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

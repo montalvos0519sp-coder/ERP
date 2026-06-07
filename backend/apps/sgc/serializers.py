@@ -2,13 +2,15 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from .models import (
-    AccionCAPA, ActividadSGC, Auditoria, Capacitacion, ComentarioSGC, CompetenciaPerfil, ElementoContexto, Equipo,
+    AccionCAPA, ActividadSGC, Auditoria, Capacitacion, ParticipanteCapacitacion, ComentarioSGC, CompetenciaPerfil, ElementoContexto, Equipo,
     EvaluacionDetalle,
     EvaluacionCompetencia, EvaluacionProveedor, EvaluacionRequisito, EvidenciaSGC, Hallazgo,
     IndicadorKPI, MedicionKPI, NoConformidad, NotificacionCalidad, Norma, ObjetivoCalidad,
     ParteInteresada, PerfilPuesto, PoliticaCalidad, Proceso, Queja, RequisitoISO,
     AcuerdoRevision, Encuesta, RespuestaEncuesta, RevisionDireccion, Riesgo,
-    SubtareaImplementacion, TareaImplementacion, TareaObjetivo,
+    SalidaNoConforme, SubtareaImplementacion, TareaImplementacion, TareaObjetivo,
+    PlantillaDocumento, HitoCertificacion, ProgramaAuditoria, PlantillaChecklist,
+    ItemChecklist, RegistroCalidad, GestionCambio, ComunicacionSGC, ConocimientoOrganizacional,
 )
 
 User = get_user_model()
@@ -86,17 +88,49 @@ class RiesgoSerializer(serializers.ModelSerializer):
 class IndicadorKPISerializer(serializers.ModelSerializer):
     cumple = serializers.BooleanField(read_only=True)
     proceso_nombre = serializers.CharField(source="proceso_ref.nombre", read_only=True, default=None)
+    responsable_nombre = serializers.SerializerMethodField()
     class Meta: model = IndicadorKPI; fields = "__all__"
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
 
 
 class MedicionKPISerializer(serializers.ModelSerializer):
     class Meta: model = MedicionKPI; fields = "__all__"; read_only_fields = ["registrado_por"]
 
 
+class ParticipanteCapacitacionSerializer(serializers.ModelSerializer):
+    nombre_display = serializers.CharField(read_only=True)
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+    evidencia_url = serializers.SerializerMethodField()
+    empleado_numero = serializers.CharField(source="empleado.numero_empleado", read_only=True, default=None)
+    class Meta:
+        model = ParticipanteCapacitacion
+        fields = "__all__"
+        read_only_fields = ["evidencia", "evidencia_nombre", "creado"]
+    def get_evidencia_url(self, o):
+        return o.evidencia.url if o.evidencia else None
+
+
 class CapacitacionSerializer(serializers.ModelSerializer):
     responsable_nombre = serializers.SerializerMethodField()
+    empleados_nombres = serializers.SerializerMethodField()
+    participantes_lista = ParticipanteCapacitacionSerializer(many=True, read_only=True)
+    resumen = serializers.SerializerMethodField()
     class Meta: model = Capacitacion; fields = "__all__"
     def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
+    def get_empleados_nombres(self, o):
+        return [{"id": e.id, "nombre": f"{e.nombre} {e.apellido}".strip(), "numero": e.numero_empleado}
+                for e in o.empleados.all()]
+    def get_resumen(self, o):
+        ps = list(o.participantes_lista.all())
+        aprobados = sum(1 for p in ps if p.estado == "APROBADO")
+        califs = [float(p.calificacion) for p in ps if p.calificacion is not None]
+        return {
+            "total": len(ps),
+            "aprobados": aprobados,
+            "asistieron": sum(1 for p in ps if p.estado in ("ASISTIO", "APROBADO", "NO_APROBADO")),
+            "con_evidencia": sum(1 for p in ps if p.evidencia),
+            "promedio": round(sum(califs) / len(califs), 1) if califs else None,
+        }
 
 
 class EquipoSerializer(serializers.ModelSerializer):
@@ -109,12 +143,34 @@ class EvaluacionProveedorSerializer(serializers.ModelSerializer):
     proveedor_nombre = serializers.CharField(source="proveedor.razon_social", read_only=True)
     puntaje = serializers.FloatField(read_only=True)
     homologado = serializers.BooleanField(read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
     class Meta: model = EvaluacionProveedor; fields = "__all__"
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
 
 
 class QuejaSerializer(serializers.ModelSerializer):
     tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
     class Meta: model = Queja; fields = "__all__"
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
+
+
+class SalidaNoConformeSerializer(serializers.ModelSerializer):
+    origen_display = serializers.CharField(source="get_origen_display", read_only=True)
+    disposicion_display = serializers.CharField(source="get_disposicion_display", read_only=True)
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
+    creado_por_nombre = serializers.SerializerMethodField()
+    proceso_nombre = serializers.CharField(source="proceso_ref.nombre", read_only=True, default=None)
+    nc_folio = serializers.CharField(source="no_conformidad.folio", read_only=True, default=None)
+    class Meta:
+        model = SalidaNoConforme
+        fields = "__all__"
+        read_only_fields = ["folio", "creado_por", "no_conformidad"]
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
+    def get_creado_por_nombre(self, o): return _nombre(o.creado_por)
 
 
 class PoliticaCalidadSerializer(serializers.ModelSerializer):
@@ -143,7 +199,9 @@ class ObjetivoCalidadSerializer(serializers.ModelSerializer):
 
 class ElementoContextoSerializer(serializers.ModelSerializer):
     tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
     class Meta: model = ElementoContexto; fields = "__all__"
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
 
 
 class ParteInteresadaSerializer(serializers.ModelSerializer):
@@ -325,3 +383,74 @@ class RespuestaEncuestaSerializer(serializers.ModelSerializer):
     class Meta:
         model = RespuestaEncuesta
         fields = "__all__"
+
+
+# ── Ecosistema de certificación ──────────────────────────────────────────────
+class PlantillaDocumentoSerializer(serializers.ModelSerializer):
+    categoria_display = serializers.CharField(source="get_categoria_display", read_only=True)
+    es_global = serializers.SerializerMethodField()
+    class Meta: model = PlantillaDocumento; fields = "__all__"
+    def get_es_global(self, o): return o.empresa_id is None
+
+
+class HitoCertificacionSerializer(serializers.ModelSerializer):
+    fase_display = serializers.CharField(source="get_fase_display", read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
+    class Meta: model = HitoCertificacion; fields = "__all__"
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
+
+
+class ProgramaAuditoriaSerializer(serializers.ModelSerializer):
+    responsable_nombre = serializers.SerializerMethodField()
+    class Meta: model = ProgramaAuditoria; fields = "__all__"
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
+
+
+class ItemChecklistSerializer(serializers.ModelSerializer):
+    class Meta: model = ItemChecklist; fields = "__all__"; read_only_fields = ["checklist"]
+
+
+class PlantillaChecklistSerializer(serializers.ModelSerializer):
+    items = ItemChecklistSerializer(many=True, read_only=True)
+    items_count = serializers.IntegerField(source="items.count", read_only=True)
+    class Meta: model = PlantillaChecklist; fields = "__all__"
+
+
+class RegistroCalidadSerializer(serializers.ModelSerializer):
+    soporte_display = serializers.CharField(source="get_soporte_display", read_only=True)
+    disposicion_display = serializers.CharField(source="get_disposicion_display", read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
+    class Meta: model = RegistroCalidad; fields = "__all__"
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
+
+
+class GestionCambioSerializer(serializers.ModelSerializer):
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    prioridad_display = serializers.CharField(source="get_prioridad_display", read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
+    creado_por_nombre = serializers.SerializerMethodField()
+    nivel_riesgo = serializers.CharField(read_only=True)
+    riesgo_score = serializers.IntegerField(read_only=True)
+    progreso_plan = serializers.IntegerField(read_only=True)
+    class Meta:
+        model = GestionCambio; fields = "__all__"
+        read_only_fields = ["folio", "creado_por"]
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
+    def get_creado_por_nombre(self, o): return _nombre(o.creado_por)
+
+
+class ComunicacionSGCSerializer(serializers.ModelSerializer):
+    direccion_display = serializers.CharField(source="get_direccion_display", read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
+    class Meta: model = ComunicacionSGC; fields = "__all__"
+    def get_responsable_nombre(self, o): return _nombre(o.responsable_user)
+
+
+class ConocimientoOrganizacionalSerializer(serializers.ModelSerializer):
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    autor_nombre = serializers.SerializerMethodField()
+    class Meta:
+        model = ConocimientoOrganizacional; fields = "__all__"
+        read_only_fields = ["autor_user"]
+    def get_autor_nombre(self, o): return _nombre(o.autor_user)

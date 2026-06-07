@@ -727,6 +727,26 @@ export const api = {
     apiFetch<any>(`/api/sgc/dashboard/resumen/${params ? "?" + new URLSearchParams(params) : ""}`),
   getAgendaSGC: (empresa?: number) =>
     apiFetch<any>(`/api/sgc/dashboard/agenda/${empresa ? `?empresa=${empresa}` : ""}`),
+  getPanoramaSGC: (empresa?: number) =>
+    apiFetch<any>(`/api/sgc/dashboard/panorama/${empresa ? `?empresa=${empresa}` : ""}`),
+  getChecklistAuditoria: (empresa?: number) =>
+    apiFetch<any>(`/api/sgc/dashboard/checklist_auditoria/${empresa ? `?empresa=${empresa}` : ""}`),
+  getAnalisisNC: (empresa?: number) =>
+    apiFetch<any>(`/api/sgc/dashboard/analisis-nc/${empresa ? `?empresa=${empresa}` : ""}`),
+  getTendenciasSGC: (empresa?: number) =>
+    apiFetch<any>(`/api/sgc/dashboard/tendencias/${empresa ? `?empresa=${empresa}` : ""}`),
+  // KPIs · mediciones históricas
+  getMedicionesKPI: (kpiId: number) =>
+    apiFetch<any>(`/api/sgc/kpis/${kpiId}/mediciones/`),
+  registrarMedicionKPI: (kpiId: number, data: { valor: number; fecha?: string; nota?: string }) =>
+    apiFetch<any>(`/api/sgc/kpis/${kpiId}/mediciones/`, { method: "POST", body: JSON.stringify(data) }),
+  // Auditoría en vivo · checklist
+  getChecklistAud: (auditoriaId: number) =>
+    apiFetch<any>(`/api/sgc/auditorias/${auditoriaId}/checklist/`),
+  guardarPuntoChecklist: (auditoriaId: number, data: { id: number; resultado?: string; nota?: string }) =>
+    apiFetch<any>(`/api/sgc/auditorias/${auditoriaId}/guardar-checklist/`, { method: "POST", body: JSON.stringify(data) }),
+  cerrarChecklistAud: (auditoriaId: number) =>
+    apiFetch<any>(`/api/sgc/auditorias/${auditoriaId}/cerrar-checklist/`, { method: "POST" }),
   // Encuestas (admin)
   getEncuestas: (empresa?: number) =>
     apiFetch<{ results: any[] }>(`/api/sgc/encuestas/?page_size=100${empresa ? `&empresa=${empresa}` : ""}`),
@@ -780,6 +800,40 @@ export const api = {
     apiFetch<{ results: any[] }>(`/api/sgc/capacitaciones/?page_size=200${params ? "&" + new URLSearchParams(params) : ""}`),
   crearCapacitacion: (data: object) => apiFetch<any>("/api/sgc/capacitaciones/", { method: "POST", body: JSON.stringify(data) }),
   actualizarCapacitacion: (id: number, data: object) => apiFetch<any>(`/api/sgc/capacitaciones/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Participantes de capacitación (calificación + evidencia por persona)
+  getParticipantesCap: (capacitacionId: number) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/participantes-capacitacion/?capacitacion=${capacitacionId}&page_size=300`),
+  crearParticipanteCap: (data: object) => apiFetch<any>("/api/sgc/participantes-capacitacion/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarParticipanteCap: (id: number, data: object) => apiFetch<any>(`/api/sgc/participantes-capacitacion/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  eliminarParticipanteCap: (id: number) => apiFetch(`/api/sgc/participantes-capacitacion/${id}/`, { method: "DELETE" }),
+  subirEvidenciaParticipante: (id: number, file: File) => {
+    const fd = new FormData(); fd.append("archivo", file);
+    return apiFetch<any>(`/api/sgc/participantes-capacitacion/${id}/evidencia/`, { method: "POST", body: fd });
+  },
+  reinscribirParticipante: (id: number) =>
+    apiFetch<any>(`/api/sgc/participantes-capacitacion/${id}/reinscribir/`, { method: "POST" }),
+  // Crea una nueva edición del curso y mueve ahí a los reprobados (recuperación).
+  reprogramarRecuperacion: (capacitacionId: number, data: { fecha?: string | null; participantes?: number[] }) =>
+    apiFetch<any>(`/api/sgc/capacitaciones/${capacitacionId}/reprogramar-recuperacion/`, { method: "POST", body: JSON.stringify(data) }),
+  getPendientesRecapacitacion: (empresa?: number) =>
+    apiFetch<{ total: number; resultados: any[] }>(`/api/sgc/capacitaciones/pendientes-recapacitacion/${empresa ? `?empresa=${empresa}` : ""}`),
+  // Descarga la constancia PDF del participante (abre en pestaña nueva con auth).
+  abrirConstanciaParticipante: async (id: number) => {
+    const token = getAccess();
+    const res = await fetch(`${getApiBase()}/api/sgc/participantes-capacitacion/${id}/constancia/`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
+    });
+    if (!res.ok) {
+      let msg = "No se pudo generar la constancia.";
+      try { const j = await res.json(); if (j.detail) msg = j.detail; } catch { /* */ }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  },
   // Equipos / calibración
   getEquiposSGC: (params?: Record<string, string>) =>
     apiFetch<{ results: any[] }>(`/api/sgc/equipos/?page_size=200${params ? "&" + new URLSearchParams(params) : ""}`),
@@ -789,6 +843,7 @@ export const api = {
   getEvaluacionesProveedor: (params?: Record<string, string>) =>
     apiFetch<{ results: any[] }>(`/api/sgc/evaluaciones-proveedor/?page_size=200${params ? "&" + new URLSearchParams(params) : ""}`),
   crearEvaluacionProveedor: (data: object) => apiFetch<any>("/api/sgc/evaluaciones-proveedor/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarEvaluacionProveedor: (id: number, data: object) => apiFetch<any>(`/api/sgc/evaluaciones-proveedor/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
   // Quejas
   getQuejas: (params?: Record<string, string>) =>
     apiFetch<{ results: any[] }>(`/api/sgc/quejas/?page_size=200${params ? "&" + new URLSearchParams(params) : ""}`),
@@ -812,6 +867,77 @@ export const api = {
   crearContexto: (data: object) => apiFetch<any>("/api/sgc/contexto/", { method: "POST", body: JSON.stringify(data) }),
   actualizarContexto: (id: number, data: object) => apiFetch<any>(`/api/sgc/contexto/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
   eliminarContexto: (id: number) => apiFetch(`/api/sgc/contexto/${id}/`, { method: "DELETE" }),
+  // Salidas no conformes (8.7)
+  getSalidasNoConformes: (params?: Record<string, string>) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/salidas-no-conformes/?page_size=300${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearSalidaNoConforme: (data: object) => apiFetch<any>("/api/sgc/salidas-no-conformes/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarSalidaNoConforme: (id: number, data: object) => apiFetch<any>(`/api/sgc/salidas-no-conformes/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  eliminarSalidaNoConforme: (id: number) => apiFetch(`/api/sgc/salidas-no-conformes/${id}/`, { method: "DELETE" }),
+  escalarSalidaNoConformeNC: (id: number) => apiFetch<any>(`/api/sgc/salidas-no-conformes/${id}/escalar/`, { method: "POST" }),
+  // ── Ecosistema de certificación ──
+  // Biblioteca de plantillas ISO
+  getPlantillasDoc: (params?: Record<string, string>) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/plantillas/?page_size=200${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearPlantillaDoc: (data: object) => apiFetch<any>("/api/sgc/plantillas/", { method: "POST", body: JSON.stringify(data) }),
+  generarDocumentoDesdePlantilla: (id: number, empresa: number) =>
+    apiFetch<any>(`/api/sgc/plantillas/${id}/generar_documento/`, { method: "POST", body: JSON.stringify({ empresa }) }),
+  // Descarga la plantilla como Word (.docx) real, con tablas nativas.
+  descargarPlantillaWord: async (id: number, empresa?: number) => {
+    const token = typeof window !== "undefined" ? window.localStorage.getItem("erp.jwt.access") : null;
+    const url = `${getApiBase()}/api/sgc/plantillas/${id}/word/${empresa ? `?empresa=${empresa}` : ""}`;
+    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new Error("No se pudo generar el Word.");
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const fname = m ? m[1] : `plantilla-${id}.docx`;
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href; a.download = fname; document.body.appendChild(a); a.click();
+    a.remove(); URL.revokeObjectURL(href);
+  },
+  // Roadmap de certificación
+  getRoadmapProgreso: (empresa?: number) => apiFetch<any>(`/api/sgc/roadmap/progreso/${empresa ? `?empresa=${empresa}` : ""}`),
+  generarRoadmap: (empresa: number) => apiFetch<any>("/api/sgc/roadmap/generar/", { method: "POST", body: JSON.stringify({ empresa }) }),
+  actualizarHito: (id: number, data: object) => apiFetch<any>(`/api/sgc/roadmap/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Programa anual de auditorías
+  getProgramasAuditoria: (params?: Record<string, string>) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/programa-auditorias/?page_size=100${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearProgramaAuditoria: (data: object) => apiFetch<any>("/api/sgc/programa-auditorias/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarProgramaAuditoria: (id: number, data: object) => apiFetch<any>(`/api/sgc/programa-auditorias/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Checklists de auditoría
+  getChecklists: (params?: Record<string, string>) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/checklists/?page_size=100${params ? "&" + new URLSearchParams(params) : ""}`),
+  // Registros de calidad (lista maestra)
+  getRegistrosCalidad: (params?: Record<string, string>) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/registros/?page_size=300${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearRegistroCalidad: (data: object) => apiFetch<any>("/api/sgc/registros/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarRegistroCalidad: (id: number, data: object) => apiFetch<any>(`/api/sgc/registros/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  eliminarRegistroCalidad: (id: number) => apiFetch(`/api/sgc/registros/${id}/`, { method: "DELETE" }),
+  // Gestión de cambios (6.3)
+  getCambios: (params?: Record<string, string>) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/cambios/?page_size=200${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearCambio: (data: object) => apiFetch<any>("/api/sgc/cambios/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarCambio: (id: number, data: object) => apiFetch<any>(`/api/sgc/cambios/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Comunicación (7.4)
+  getComunicaciones: (params?: Record<string, string>) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/comunicacion/?page_size=200${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearComunicacion: (data: object) => apiFetch<any>("/api/sgc/comunicacion/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarComunicacion: (id: number, data: object) => apiFetch<any>(`/api/sgc/comunicacion/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  eliminarComunicacion: (id: number) => apiFetch(`/api/sgc/comunicacion/${id}/`, { method: "DELETE" }),
+  // Conocimiento organizacional (7.1.6)
+  getConocimiento: (params?: Record<string, string>) =>
+    apiFetch<{ results: any[] }>(`/api/sgc/conocimiento/?page_size=200${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearConocimiento: (data: object) => apiFetch<any>("/api/sgc/conocimiento/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarConocimiento: (id: number, data: object) => apiFetch<any>(`/api/sgc/conocimiento/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  eliminarConocimiento: (id: number) => apiFetch(`/api/sgc/conocimiento/${id}/`, { method: "DELETE" }),
+  // Normas (multi-norma)
+  getNormas: () => apiFetch<{ results: any[] }>("/api/sgc/normas/?page_size=50"),
+  // Onboarding del SGC por giro
+  getGirosOnboarding: () => apiFetch<any[]>("/api/sgc/onboarding/giros/"),
+  getEstadoOnboarding: (empresa: number) => apiFetch<any>(`/api/sgc/onboarding/estado/?empresa=${empresa}`),
+  generarOnboarding: (empresa: number, giro: string) =>
+    apiFetch<any>("/api/sgc/onboarding/generar/", { method: "POST", body: JSON.stringify({ empresa, giro }) }),
   getPartesInteresadas: (params?: Record<string, string>) => apiFetch<{ results: any[] }>(`/api/sgc/partes-interesadas/?page_size=300&${new URLSearchParams(params || {})}`),
   crearParteInteresada: (data: object) => apiFetch<any>("/api/sgc/partes-interesadas/", { method: "POST", body: JSON.stringify(data) }),
   actualizarParteInteresada: (id: number, data: object) => apiFetch<any>(`/api/sgc/partes-interesadas/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
@@ -848,6 +974,8 @@ export const api = {
   // ── SGC · Colaboración multi-usuario (Pilar 1) ──
   getMiembrosSGC: (empresa?: number) =>
     apiFetch<any[]>(`/api/sgc/miembros/${empresa ? `?empresa=${empresa}` : ""}`),
+  getCargaMiembrosSGC: (empresa?: number) =>
+    apiFetch<any[]>(`/api/sgc/miembros/carga/${empresa ? `?empresa=${empresa}` : ""}`),
   getComentariosSGC: (tipo: string, objeto: number | string) =>
     apiFetch<{ results: any[] }>(`/api/sgc/comentarios/?tipo=${tipo}&objeto=${objeto}&page_size=200`),
   crearComentarioSGC: (tipo: string, objeto: number | string, texto: string) =>
@@ -935,10 +1063,6 @@ export const api = {
     apiFetch<any>(`/api/sgc/tareas-objetivo/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
   eliminarTareaObjetivo: (id: number) =>
     apiFetch<any>(`/api/sgc/tareas-objetivo/${id}/`, { method: "DELETE" }),
-  getMedicionesKPI: (kpiId: number) =>
-    apiFetch<{ results: any[] }>(`/api/sgc/mediciones-kpi/?kpi=${kpiId}&page_size=100`),
-  crearMedicionKPI: (data: object) =>
-    apiFetch<any>("/api/sgc/mediciones-kpi/", { method: "POST", body: JSON.stringify(data) }),
 
   // Flujos / Checklists de mantenimiento
   getFlujosMantto: () =>
@@ -985,13 +1109,13 @@ export const api = {
   misEtapasProceso: () =>
     apiFetch<{ count: number; results: any[] }>("/api/mantenimiento/ejecuciones/mis-etapas/"),
 
-  // ── Liquidaciones ──
-  getLiquidaciones: (params?: Record<string, string>) =>
-    apiFetch<{ results: any[] }>(`/api/liquidaciones/liquidaciones/${params ? "?" + new URLSearchParams(params) : ""}`),
-
   // ── RH ──
   getEmpleados: (params?: Record<string, string>) =>
     apiFetch<{ results: any[] }>(`/api/rh/empleados/${params ? "?" + new URLSearchParams(params) : ""}`),
+  // Portal de autoservicio del empleado (datos del usuario logueado).
+  getMiPortalEmpleado: () => apiFetch<any>("/api/rh/empleados/mi-portal/"),
+  getUsuariosVinculables: (empresa?: number) =>
+    apiFetch<any[]>(`/api/rh/empleados/usuarios-vinculables/${empresa ? `?empresa=${empresa}` : ""}`),
   getDepartamentos: () => apiFetch<{ results: any[] }>("/api/rh/departamentos/?page_size=200"),
   getPuestos: () => apiFetch<{ results: any[] }>("/api/rh/puestos/?page_size=200"),
 
@@ -1071,8 +1195,6 @@ export const api = {
     apiFetch(`/api/rh/prestamos/${id}/`, { method: "DELETE" }),
 
   // ── Compatibilidad con ViajeForm migrado ──
-  getOperadores: () => apiFetch<{ results: any[] }>("/api/operadores/?page_size=200"),
-  getCatLugares: () => apiFetch<{ results: any[] }>("/api/cat/lugares/?page_size=500"),
   getCatUnidades: () => apiFetch<{ results: any[] }>("/api/cat/unidades/?page_size=500"),
   getCatEmpresas: () => apiFetch<{ results: any[] }>("/api/cat/empresas/?page_size=200"),
   editarCatLugar: (id: number | string, data: object) =>
@@ -1080,7 +1202,7 @@ export const api = {
   editarCatUnidad: (id: number | string, data: object) =>
     apiFetch<any>(`/api/cat/unidades/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
 
-  // Mercancias y paradas dentro de un viaje (stubs por ahora)
+  // Mercancias y paradas dentro de un viaje
   agregarMercanciaViaje: (viajeId: number | string, data: object) =>
     apiFetch<any>(`/api/viajes/viajes/${viajeId}/mercancias/`, { method: "POST", body: JSON.stringify(data) }),
   actualizarMercanciaViaje: (viajeId: number | string, id: number | string, data: object) =>
@@ -1093,6 +1215,75 @@ export const api = {
     apiFetch<any>(`/api/viajes/viajes/${viajeId}/paradas/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
   eliminarParadaViaje: (viajeId: number | string, id: number | string) =>
     apiFetch(`/api/viajes/viajes/${viajeId}/paradas/${id}/`, { method: "DELETE" }),
+  reordenarParadasViaje: (viajeId: number | string, orden: number[]) =>
+    apiFetch<any>(`/api/viajes/viajes/${viajeId}/paradas/reordenar/`, { method: "POST", body: JSON.stringify({ orden }) }),
+
+  // Determinantes (catálogo de destinos del cliente)
+  getDeterminantes: (params?: Record<string, string>) =>
+    apiFetch<any>(`/api/viajes/determinantes/?page_size=300${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearDeterminante: (data: object) =>
+    apiFetch<any>("/api/viajes/determinantes/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarDeterminante: (id: number | string, data: object) =>
+    apiFetch<any>(`/api/viajes/determinantes/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  eliminarDeterminante: (id: number | string) =>
+    apiFetch(`/api/viajes/determinantes/${id}/`, { method: "DELETE" }),
+
+  // Carta Porte (SAT): timbrar / cancelar / re-timbrar
+  timbrarCartaPorte: (viajeId: number | string) =>
+    apiFetch<any>(`/api/viajes/viajes/${viajeId}/timbrar/`, { method: "POST" }),
+  cancelarCartaPorte: (viajeId: number | string, motivo: string) =>
+    apiFetch<any>(`/api/viajes/viajes/${viajeId}/cancelar/`, { method: "POST", body: JSON.stringify({ motivo }) }),
+  reactivarCartaPorte: (viajeId: number | string) =>
+    apiFetch<any>(`/api/viajes/viajes/${viajeId}/reactivar/`, { method: "POST" }),
+  getCartaPorteXmlUrl: (viajeId: number | string) => `${getApiBase()}/api/viajes/viajes/${viajeId}/cp-xml/`,
+  // Descargas autenticadas (los endpoints requieren Bearer; abrir como link daría 401).
+  descargarArchivoAuth: async (path: string, fallbackName: string, abrirEnPestana = false) => {
+    const token = typeof window !== "undefined" ? window.localStorage.getItem("erp.jwt.access") : null;
+    const res = await fetch(`${getApiBase()}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) {
+      let msg = "No se pudo descargar el archivo.";
+      try { const j = await res.json(); msg = j.detail || msg; } catch { /* */ }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const fname = m ? m[1] : fallbackName;
+    const href = URL.createObjectURL(blob);
+    if (abrirEnPestana) {
+      window.open(href, "_blank");
+      setTimeout(() => URL.revokeObjectURL(href), 60000);
+    } else {
+      const a = document.createElement("a");
+      a.href = href; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(href);
+    }
+  },
+  descargarViajePdf: (id: number | string) =>
+    api.descargarArchivoAuth(`/api/viajes/viajes/${id}/pdf/`, `viaje-${id}.pdf`, true),
+  descargarCartaPorteXml: (id: number | string) =>
+    api.descargarArchivoAuth(`/api/viajes/viajes/${id}/cp-xml/`, `CP-${id}.xml`),
+  descargarCartaPortePdf: (id: number | string) =>
+    api.descargarArchivoAuth(`/api/viajes/viajes/${id}/cp-pdf/`, `CP-${id}.pdf`, true),
+
+  // Catálogo de categorías de gasto de viaje (dar de alta)
+  getCategoriasGasto: (params?: Record<string, string>) =>
+    apiFetch<any>(`/api/viajes/categorias-gasto/?page_size=300${params ? "&" + new URLSearchParams(params) : ""}`),
+  crearCategoriaGasto: (data: object) =>
+    apiFetch<any>("/api/viajes/categorias-gasto/", { method: "POST", body: JSON.stringify(data) }),
+  // Gastos de viaje
+  crearGastoViaje: (data: object) =>
+    apiFetch<any>("/api/viajes/gastos/", { method: "POST", body: JSON.stringify(data) }),
+  actualizarGastoViaje: (id: number | string, data: object) =>
+    apiFetch<any>(`/api/viajes/gastos/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  eliminarGastoViaje: (id: number | string) =>
+    apiFetch(`/api/viajes/gastos/${id}/`, { method: "DELETE" }),
+  subirEvidenciaGasto: (gastoId: number | string, file: File) => {
+    const fd = new FormData(); fd.append("archivo", file);
+    return apiFetch<any>(`/api/viajes/gastos/${gastoId}/evidencia/`, { method: "POST", body: fd });
+  },
+  eliminarEvidenciaGasto: (gastoId: number | string, evId: number | string) =>
+    apiFetch(`/api/viajes/gastos/${gastoId}/evidencia/${evId}/`, { method: "DELETE" }),
 
   // Licencia del operador
   actualizarOperadorLicencia: (id: number | string, data: object) =>
@@ -1103,9 +1294,9 @@ export const api = {
   getViajesExportExcelUrl: (params?: Record<string, string>) =>
     `${getApiBase()}/api/viajes/viajes/export-excel/${params ? "?" + new URLSearchParams(params) : ""}`,
 
-  // Busqueda de CP del catalogo SAT
+  // Búsqueda de CP del catálogo SAT: usa lookup/ que auto-llena estado, municipio y colonias.
   buscarCP: (cp: string) =>
-    apiFetch<any>(`/api/catalogos-sat/codigos-postales/?search=${encodeURIComponent(cp)}&page_size=20`),
+    apiFetch<any>(`/api/catalogos-sat/codigos-postales/lookup/?cp=${encodeURIComponent(cp)}`),
   buscarCatalogoSAT: (catalogo: string, q: string) =>
     apiFetch<any>(`/api/catalogos-sat/${catalogo}/?search=${encodeURIComponent(q)}&page_size=20`),
 
@@ -1409,6 +1600,22 @@ export const api = {
     apiFetch<{ results: any[]; count: number }>(`/api/documentos/documentos/${params ? "?" + new URLSearchParams(params) : ""}`),
   getDocumento: (id: number | string) =>
     apiFetch<any>(`/api/documentos/documentos/${id}/`),
+  // Descarga el documento como Word (.docx) real con tablas nativas.
+  descargarDocumentoWord: async (id: number | string) => {
+    const token = typeof window !== "undefined" ? window.localStorage.getItem("erp.jwt.access") : null;
+    const res = await fetch(`${getApiBase()}/api/documentos/documentos/${id}/word/`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error("No se pudo generar el Word.");
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const fname = m ? m[1] : `documento-${id}.docx`;
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href; a.download = fname; document.body.appendChild(a); a.click();
+    a.remove(); URL.revokeObjectURL(href);
+  },
   crearDocumento: (data: FormData | object) => {
     const opts: RequestInit = data instanceof FormData
       ? { method: "POST", body: data }

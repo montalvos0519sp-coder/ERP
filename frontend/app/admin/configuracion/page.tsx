@@ -26,6 +26,7 @@ interface ConfigForm {
   pac_secret_key: string;
   pac_plugin: string;
   pac_sandbox: boolean;
+  pac_serie_cp_id: string;
   emisor_rfc: string;
   emisor_nombre: string;
   emisor_regimen: string;
@@ -46,6 +47,7 @@ const VACIO: ConfigForm = {
   pac_secret_key: "",
   pac_plugin: "9",
   pac_sandbox: false,
+  pac_serie_cp_id: "",
   emisor_rfc: "",
   emisor_nombre: "",
   emisor_regimen: "601",
@@ -441,6 +443,13 @@ export default function ConfiguracionPage() {
                       : "Se guarda cifrado y no se vuelve a mostrar por seguridad."}
                   </span>
                 </Field>
+                <Field label="ID Serie Carta Porte (Traslado)" icon={<FileText className="w-3 h-3" />}>
+                  <input className={`input ${inputClass(isDarkMode)} font-mono`} value={form.pac_serie_cp_id}
+                    onChange={(e) => setForm({ ...form, pac_serie_cp_id: e.target.value })} placeholder="Ej. 1298323" />
+                  <span className={`text-[10px] mt-1 block ${theme.textTertiary}`}>
+                    ID de la serie de tipo Traslado/Carta Porte en tu cuenta de Factura.com. Requerido para timbrar la Carta Porte de los viajes.
+                  </span>
+                </Field>
                 <div className="md:col-span-2">
                   <label className={`flex items-center justify-between p-4 rounded-xl border ${theme.divider}`}>
                     <div>
@@ -726,7 +735,7 @@ export default function ConfiguracionPage() {
               <InfoRow theme={theme} label="Version" value="ERP Profesional v1.0" />
               <InfoRow theme={theme} label="Backend" value={API_BASE} />
               <InfoRow theme={theme} label="Empresa activa" value={empresa?.nombre_comercial || "-"} />
-              <InfoRow theme={theme} label="Empresas con acceso" value={String(user?.empresas?.length || 0)} />
+              <InfoRow theme={theme} label="Empresa" value={user?.empresas?.[0]?.nombre || "-"} />
               <InfoRow theme={theme} label="Tu rol" value={user?.is_superuser ? "Super Admin" : (user?.empresas?.[0]?.rol || "USER")} />
               <InfoRow theme={theme} label="Modo de PAC" value={form.pac_proveedor === "manual" ? "Manual (sin timbrar)" : "Factura.com"} />
             </div>
@@ -795,7 +804,7 @@ function Field({ label, icon, children, className = "" }: any) {
   );
 }
 
-function FeatureToggle({ theme, title, desc, checked, onChange }: any) {
+function FeatureToggle({ theme, title, desc, checked, onChange }: { theme: any; title: string; desc: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className={`flex items-center justify-between p-4 rounded-xl border ${theme.divider} hover:bg-white/[0.02] transition-all`}>
       <div className="pr-4">

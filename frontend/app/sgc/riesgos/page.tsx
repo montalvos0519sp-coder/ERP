@@ -51,20 +51,48 @@ export default function RiesgosPage() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push("/sgc")} className={`p-2 rounded-xl border ${isDarkMode ? "border-white/[0.08]" : "border-slate-200"}`}><ArrowLeft className={`w-4 h-4 ${theme.textSecondary}`} /></button>
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-md bg-gradient-to-br from-amber-500 to-orange-600"><ShieldAlert className="w-6 h-6 text-white" /></div>
-          <div>
-            <h1 className={`text-2xl font-black tracking-tight ${theme.textPrimary}`}>Gestión de Riesgos</h1>
-            <p className={`text-sm ${theme.textSecondary}`}>Matriz probabilidad × impacto, controles y planes de mitigación.</p>
+      <div className={`relative overflow-hidden rounded-3xl border ${card}`}>
+        <div className="absolute inset-0 opacity-[0.08] pointer-events-none"
+          style={{ background: "radial-gradient(circle at 10% 20%, #F59E0B 0, transparent 40%), radial-gradient(circle at 90% 80%, #EF4444 0, transparent 42%)" }} />
+        <div className="relative p-6">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <button onClick={() => router.push("/sgc")} className={`p-2 rounded-xl border ${isDarkMode ? "border-white/[0.08] hover:bg-white/[0.05]" : "border-slate-200 hover:bg-slate-50"} transition`}><ArrowLeft className={`w-4 h-4 ${theme.textSecondary}`} /></button>
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg bg-gradient-to-br from-amber-500 via-orange-500 to-orange-600"><ShieldAlert className="w-7 h-7 text-white" /></div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className={`text-2xl lg:text-3xl font-black tracking-tight ${theme.textPrimary}`}>Gestión de Riesgos</h1>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full text-white bg-gradient-to-r from-amber-500 to-orange-600">ISO 6.1</span>
+                </div>
+                <p className={`text-sm mt-0.5 max-w-xl ${theme.textSecondary}`}>Pensamiento basado en riesgos: matriz probabilidad × impacto, controles y planes de mitigación.</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={load} className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border ${isDarkMode ? "bg-white/[0.04] border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /></button>
+              <button onClick={() => exportCSV("riesgos", ["Proceso", "Riesgo", "Probabilidad", "Impacto", "Nivel", "Severidad", "Estado", "Responsable"], items.map((r) => [r.proceso, r.descripcion, r.probabilidad, r.impacto, r.nivel, r.severidad, r.estado, r.responsable]))}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold border ${isDarkMode ? "bg-white/[0.04] border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><Download className="w-4 h-4" /> Export</button>
+              <button onClick={() => setEdit({})} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-amber-500 to-orange-600 shadow-md hover:shadow-lg transition"><Plus className="w-4 h-4" /> Nuevo riesgo</button>
+            </div>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={load} className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border ${isDarkMode ? "bg-white/[0.04] border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /></button>
-          <button onClick={() => exportCSV("riesgos", ["Proceso", "Riesgo", "Probabilidad", "Impacto", "Nivel", "Severidad", "Estado", "Responsable"], items.map((r) => [r.proceso, r.descripcion, r.probabilidad, r.impacto, r.nivel, r.severidad, r.estado, r.responsable]))}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold border ${isDarkMode ? "bg-white/[0.04] border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}><Download className="w-4 h-4" /> Export</button>
-          <button onClick={() => setEdit({})} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-amber-500 to-orange-600"><Plus className="w-4 h-4" /> Nuevo riesgo</button>
+          {/* Banda de severidad */}
+          {items.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-5">
+              {([["CRITICO", "Críticos", "#DC2626"], ["ALTO", "Altos", "#F59E0B"], ["MEDIO", "Medios", "#0EA5E9"], ["BAJO", "Bajos", "#10B981"]] as const).map(([sev, lbl, c]) => {
+                const n = items.filter((r) => r.severidad === sev).length;
+                return (
+                  <div key={sev} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border ${isDarkMode ? "border-white/[0.06] bg-white/[0.02]" : "border-slate-200 bg-slate-50/60"}`}>
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: c }} />
+                    <span className={`text-sm font-black tabular-nums ${theme.textPrimary}`}>{n}</span>
+                    <span className={`text-[11px] font-bold ${theme.textTertiary}`}>{lbl}</span>
+                  </div>
+                );
+              })}
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border ${isDarkMode ? "border-white/[0.06] bg-white/[0.02]" : "border-slate-200 bg-slate-50/60"}`}>
+                <span className={`text-sm font-black tabular-nums ${theme.textPrimary}`}>{items.length}</span>
+                <span className={`text-[11px] font-bold ${theme.textTertiary}`}>total</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

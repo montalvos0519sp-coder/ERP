@@ -578,7 +578,7 @@ function NotifConfigPanel({ empresaId, isDark }: { empresaId: number | null; isD
   );
 }
 
-function Toggle({ title, desc, checked, onChange, isDark }: any) {
+function Toggle({ title, desc, checked, onChange, isDark }: { title: string; desc: string; checked: boolean; onChange: (v: boolean) => void; isDark: boolean }) {
   return (
     <label
       className={`flex items-center justify-between gap-3 p-3 rounded-xl border cursor-pointer transition-all ${

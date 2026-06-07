@@ -514,14 +514,13 @@ class Command(BaseCommand):
 
     # ─────────────────────────────────────────── Viajes (carta porte)
     def seed_viajes(self):
-        from apps.carta_porte.models import Autotransporte, Operador, Ubicacion
-        from apps.viajes.models import Viaje
+        from apps.carta_porte.models import Operador, Ubicacion
+        from apps.flota.models import Unidad
+        from apps.viajes.models import Determinante, MercanciaViaje, ParadaViaje, Viaje
 
         if not getattr(self, "clientes", None):
             from apps.facturacion.models import Cliente
             self.clientes = list(Cliente.objects.filter(empresa=self.emp))
-        if not self.clientes:
-            return "sin clientes"
 
         ubic_def = [
             ("CEDIS Monterrey", "64000", "NLE"), ("Patio Guadalajara", "44100", "JAL"),
@@ -537,44 +536,81 @@ class Command(BaseCommand):
             )
             ubicaciones.append(u)
 
-        autos = []
+        unidades = []
         for i in range(1, 6):
-            a, _ = Autotransporte.objects.get_or_create(
-                empresa=self.emp, placas=f"RTP-{i:03d}",
-                defaults={"anio_modelo": RNG.randint(2015, 2024), "config_vehicular": "T3S2",
-                          "permiso_sct": "TPAF01", "numero_permiso": f"SCT{RNG.randint(100000, 999999)}",
-                          "aseguradora_resp_civil": "Qualitas", "poliza_resp_civil": f"POL{RNG.randint(10000, 99999)}"},
+            un, _ = Unidad.objects.get_or_create(
+                empresa=self.emp, numero=f"U-{i:03d}",
+                defaults={"placas": f"RTP-{i:03d}", "marca": "Kenworth", "modelo": "T680",
+                          "anio": RNG.randint(2015, 2024), "config_vehicular": "T3S2",
+                          "peso_bruto_vehicular": D(48), "permiso_sct": "TPAF01",
+                          "numero_permiso_sct": f"SCT{RNG.randint(100000, 999999)}",
+                          "aseguradora_resp_civil": "Qualitas", "poliza_resp_civil": f"POL{RNG.randint(10000, 99999)}",
+                          "remolque1_subtipo": "CTR004", "remolque1_placa": f"REM-{i:03d}"},
             )
-            autos.append(a)
+            unidades.append(un)
 
         operadores = []
         for i in range(1, 6):
             o, _ = Operador.objects.get_or_create(
                 empresa=self.emp, rfc=f"OPER{RNG.randint(100000, 999999)}{i:02d}"[:13],
                 defaults={"nombre": f"Operador Demo {i}", "licencia": f"LIC{RNG.randint(1000000, 9999999)}",
+                          "licencia_vencimiento": self.hoy + timedelta(days=RNG.randint(120, 900)),
                           "codigo_postal": "64000"},
             )
             operadores.append(o)
 
+        # Determinantes (catálogo de destinos del cliente).
+        det_def = [("0001", "Tienda Centro", "Walmart"), ("0002", "CEDIS Norte", "Soriana"),
+                   ("0003", "Sucursal Sur", "Chedraui")]
+        for cod, nom, cli in det_def:
+            Determinante.objects.get_or_create(
+                empresa=self.emp, codigo=cod,
+                defaults={"nombre": nom, "cliente": cli, "ubicacion": RNG.choice(ubicaciones)})
+
+        MERC = [("14121503", "Cartón", "H87", False, ""),
+                ("24121500", "Tarimas de madera", "H87", False, ""),
+                ("12352106", "Pintura base solvente (inflamable)", "H87", True, "1263")]
+
         viajes = 0
         for i in range(1, 16):
-            numero = f"V-{i:04d}"
+            numero = str(i)
             if Viaje.objects.filter(empresa=self.emp, numero=numero).exists():
                 continue
             origen, destino = RNG.sample(ubicaciones, 2)
             salida = self.hoy + timedelta(days=RNG.randint(-30, 15))
-            Viaje.objects.create(
-                empresa=self.emp, numero=numero, cliente=RNG.choice(self.clientes),
+            v = Viaje.objects.create(
+                empresa=self.emp, numero=numero, folio_carga=f"CRG-{i:04d}",
+                cliente=RNG.choice(self.clientes) if self.clientes else None,
                 origen=origen, destino=destino,
-                fecha_salida=dt(salida, RNG.randint(5, 20)),
+                fecha_viaje=dt(salida, RNG.randint(5, 20)),
                 fecha_llegada=dt(salida + timedelta(days=1), RNG.randint(5, 20)),
-                autotransporte=RNG.choice(autos), operador=RNG.choice(operadores),
+                unidad=RNG.choice(unidades), operador=RNG.choice(operadores),
                 km_recorridos=D(RNG.randint(200, 1500)), tarifa=D(RNG.randint(8000, 35000)),
-                estado=RNG.choice(["PROGRAMADO", "EN_TRANSITO", "ENTREGADO", "ENTREGADO"]),
+                sueldo_operador=D(RNG.randint(800, 3500)),
+                estado=RNG.choice(["PLANIFICADO", "EN_RUTA", "ENTREGADO", "ENTREGADO"]),
                 creado_por=self.admin,
             )
+            # Itinerario: origen + destino (a veces 1 intermedia).
+            seq = [origen]
+            if RNG.random() < 0.4:
+                seq.append(RNG.choice([u for u in ubicaciones if u not in (origen, destino)]))
+            seq.append(destino)
+            paradas = []
+            for k, ub in enumerate(seq, start=1):
+                paradas.append(ParadaViaje.objects.create(
+                    viaje=v, orden=k, ubicacion=ub,
+                    fecha_hora=dt(salida + timedelta(days=k - 1), RNG.randint(5, 20)),
+                    kms=D(0 if k == 1 else RNG.randint(120, 600))))
+            for _ in range(RNG.randint(1, 3)):
+                clave, desc, um, pel, cve = RNG.choice(MERC)
+                MercanciaViaje.objects.create(
+                    viaje=v, parada_origen=paradas[0], parada_destino=paradas[-1],
+                    clave_producto=clave, descripcion=desc, cantidad=D(RNG.randint(1, 50)),
+                    peso_kg=D(RNG.randint(50, 1200)), unidad_medida=um,
+                    material_peligroso=pel, clave_material_peligroso=cve,
+                    embalaje="4G" if pel else "", descripcion_embalaje="Caja de cartón" if pel else "")
             viajes += 1
-        return f"{len(ubicaciones)} ubicaciones, {len(autos)} autotransportes, {len(operadores)} operadores, {viajes} viajes"
+        return f"{len(ubicaciones)} ubicaciones, {len(unidades)} unidades, {len(operadores)} operadores, {viajes} viajes"
 
     # ─────────────────────────────────────────── Mantenimiento
     def seed_mantenimiento(self):

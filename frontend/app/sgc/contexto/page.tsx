@@ -11,6 +11,7 @@ import { ArrowLeft, Building2, Network, Plus, Trash2, X, Lightbulb, Target } fro
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useUser } from "@/lib/UserContext";
+import { SelectorUsuario, PanelColaboracion } from "@/components/sgc/Colaboracion";
 
 const FODA = [
   { t: "F", label: "Fortalezas", color: "#10b981", desc: "Internas · positivas" },
@@ -157,25 +158,27 @@ export default function ContextoPage() {
 
 function FodaModal({ e, foda, isDark, theme, onClose, onSaved }: any) {
   const meta = foda.find((x: any) => x.t === e.tipo);
-  const [f, setF] = useState<any>({ descripcion: e.descripcion || "", estrategia: e.estrategia || "" });
+  const [f, setF] = useState<any>({ descripcion: e.descripcion || "", estrategia: e.estrategia || "", responsable_user: null, ...e });
   const [busy, setBusy] = useState(false);
   const inp = `w-full px-3 py-2 rounded-lg border text-sm outline-none ${isDark ? "bg-[#1E293B]/60 border-white/[0.08] text-white" : "bg-white border-slate-200 text-slate-900"}`;
   const lbl = `text-xs font-bold mb-1 block ${theme.textSecondary}`;
   const guardar = async () => {
     if (!f.descripcion?.trim()) { alert("Describe el factor."); return; }
     setBusy(true);
-    try { await api.actualizarContexto(e.id, { descripcion: f.descripcion, estrategia: f.estrategia || "" }); onSaved(); }
+    try { await api.actualizarContexto(e.id, { descripcion: f.descripcion, estrategia: f.estrategia || "", responsable_user: f.responsable_user || null }); onSaved(); }
     catch (err) { alert((err as Error).message); } finally { setBusy(false); }
   };
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={(ev) => ev.stopPropagation()} className={`w-full max-w-lg rounded-3xl border overflow-hidden ${isDark ? "bg-slate-900 border-white/[0.08]" : "bg-white border-slate-200"}`}>
-        <div className="px-5 py-3 flex items-center justify-between" style={{ background: `linear-gradient(90deg, ${meta?.color}, ${meta?.color}bb)` }}><h2 className="text-base font-black text-white flex items-center gap-2"><span className="w-6 h-6 rounded-md bg-white/25 flex items-center justify-center">{e.tipo}</span> {meta?.label}</h2><button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10"><X className="w-4 h-4 text-white/80" /></button></div>
-        <div className="p-5 space-y-3">
+      <div onClick={(ev) => ev.stopPropagation()} className={`w-full max-w-lg rounded-3xl border overflow-hidden max-h-[94vh] flex flex-col ${isDark ? "bg-slate-900 border-white/[0.08]" : "bg-white border-slate-200"}`}>
+        <div className="px-5 py-3 flex items-center justify-between shrink-0" style={{ background: `linear-gradient(90deg, ${meta?.color}, ${meta?.color}bb)` }}><h2 className="text-base font-black text-white flex items-center gap-2"><span className="w-6 h-6 rounded-md bg-white/25 flex items-center justify-center">{e.tipo}</span> {meta?.label}</h2><button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10"><X className="w-4 h-4 text-white/80" /></button></div>
+        <div className="p-5 space-y-3 overflow-auto">
           <div><label className={lbl}>Factor</label><textarea rows={2} className={inp} value={f.descripcion} onChange={(ev) => setF((p: any) => ({ ...p, descripcion: ev.target.value }))} /></div>
           <div><label className={`${lbl} flex items-center gap-1`}><Target className="w-3.5 h-3.5" /> Estrategia (¿cómo se aprovecha o aborda?)</label><textarea rows={2} className={inp} value={f.estrategia} onChange={(ev) => setF((p: any) => ({ ...p, estrategia: ev.target.value }))} placeholder="Acción concreta para capitalizar o mitigar este factor…" /></div>
+          <SelectorUsuario label="Responsable de la estrategia" value={f.responsable_user} onChange={(id) => setF((p: any) => ({ ...p, responsable_user: id }))} />
+          {e.id && <div><div className={`text-xs font-black uppercase tracking-wider mb-2 ${theme.textSecondary}`}>Colaboración</div><PanelColaboracion tipo="contexto" objetoId={e.id} /></div>}
         </div>
-        <div className={`px-5 py-3 border-t flex justify-end gap-2 ${isDark ? "border-white/[0.08]" : "border-slate-200"}`}><button onClick={onClose} className={`px-4 py-2 rounded-xl text-sm font-bold ${isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}>Cancelar</button><button onClick={guardar} disabled={busy} className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: meta?.color }}>{busy ? "Guardando…" : "Guardar"}</button></div>
+        <div className={`px-5 py-3 border-t flex justify-end gap-2 shrink-0 ${isDark ? "border-white/[0.08]" : "border-slate-200"}`}><button onClick={onClose} className={`px-4 py-2 rounded-xl text-sm font-bold ${isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}>Cancelar</button><button onClick={guardar} disabled={busy} className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: meta?.color }}>{busy ? "Guardando…" : "Guardar"}</button></div>
       </div>
     </div>
   );

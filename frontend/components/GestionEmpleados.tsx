@@ -6,7 +6,7 @@ import {
   Search, Filter, Download, UserPlus, ChevronLeft, ChevronRight,
   ChevronUp, ChevronDown, RefreshCw, ExternalLink, AlertTriangle,
   Users, UserCheck, FileText, Eye, Edit, ChevronDown as Arrow,
-  X, Calendar, Upload, FileSpreadsheet, CheckCircle2,
+  X, Calendar, Upload, FileSpreadsheet, CheckCircle2, Link2, Search as SearchIcon,
 } from "lucide-react";
 import { api, API_BASE } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeContext";
@@ -41,6 +41,8 @@ interface Empleado {
   activo: boolean;
   eliminado?: boolean;
   indice_descendente?: number;
+  user_sistema?: number | null;
+  user_sistema_nombre?: string | null;
 }
 
 interface PageData {
@@ -182,6 +184,9 @@ export default function GestionEmpleados() {
   const [page, setPage]         = useState(1);
   const PAGE_SIZE = 20;
 
+  // Vinculación empleado ↔ usuario del sistema
+  const [vincular, setVincular] = useState<Empleado | null>(null);
+
   // Importación de Excel/CSV
   const [openImport, setOpenImport] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -267,7 +272,7 @@ export default function GestionEmpleados() {
     setLoading(true); setError(false);
     try {
       const res = await api.getEmpleados(buildParams());
-      setData(res);
+      setData(res as unknown as PageData);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -635,6 +640,13 @@ export default function GestionEmpleados() {
                         {/* Acciones */}
                         <td className="px-3 py-3">
                           <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => setVincular(emp)}
+                              className={`p-1.5 rounded transition-colors ${emp.user_sistema ? "text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/40" : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"}`}
+                              title={emp.user_sistema ? `Usuario vinculado: ${emp.user_sistema_nombre || ""}` : "Vincular usuario del sistema"}
+                            >
+                              <Link2 size={14} />
+                            </button>
                             <Link
                               href={`/rh/empleados/${emp.id}`}
                               className="p-1.5 rounded text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition-colors"
@@ -839,7 +851,9 @@ export default function GestionEmpleados() {
                     if (!importFile) return;
                     setImporting(true);
                     try {
-                      const r = await api.importarEmpleadosRH(importFile);
+                      const fd = new FormData();
+                      fd.append("archivo", importFile);
+                      const r = await api.importarEmpleadosRH(fd);
                       setImportResult(r);
                     } catch (e: unknown) {
                       alert(e instanceof Error ? e.message : "Error al importar");
@@ -854,6 +868,89 @@ export default function GestionEmpleados() {
           </div>
         </div>
       )}
+
+      {vincular && (
+        <VincularUsuarioModal emp={vincular} isDark={isDarkMode}
+          onClose={() => setVincular(null)}
+          onSaved={() => { setVincular(null); load(); }} />
+      )}
+    </div>
+  );
+}
+
+// Modal para vincular un empleado con un usuario del sistema (para su portal).
+function VincularUsuarioModal({ emp, isDark, onClose, onSaved }: {
+  emp: Empleado; isDark: boolean; onClose: () => void; onSaved: () => void;
+}) {
+  const [usuarios, setUsuarios] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState<number | null>(emp.user_sistema ?? null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.getUsuariosVinculables().then((u) => setUsuarios(u || [])).catch(() => setUsuarios([]));
+  }, []);
+
+  const filtrados = usuarios.filter((u) =>
+    !q || `${u.nombre} ${u.username} ${u.email}`.toLowerCase().includes(q.toLowerCase()));
+
+  const guardar = async (userId: number | null) => {
+    setBusy(true);
+    try {
+      await api.actualizarEmpleadoRH(emp.id, { user_sistema: userId });
+      onSaved();
+    } catch (e) { alert(e instanceof Error ? e.message : "Error"); setBusy(false); }
+  };
+
+  const inp = `w-full px-3 py-2 rounded-lg border text-sm outline-none ${isDark ? "bg-[#1E293B]/60 border-white/[0.08] text-white" : "bg-white border-slate-200 text-slate-900"}`;
+
+  return (
+    <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className={`w-full max-w-md rounded-3xl border overflow-hidden max-h-[90vh] flex flex-col ${isDark ? "bg-slate-900 border-white/[0.08]" : "bg-white border-slate-200"}`}>
+        <div className="px-5 py-3 bg-gradient-to-r from-indigo-600 to-violet-700 flex items-center justify-between shrink-0">
+          <h2 className="text-base font-black text-white flex items-center gap-2"><Link2 className="w-4 h-4" /> Vincular usuario</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10"><X className="w-4 h-4 text-white/80" /></button>
+        </div>
+        <div className="p-5 overflow-auto space-y-3">
+          <p className={`text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+            Conecta a <b>{emp.nombre_completo}</b> con un usuario del sistema. Así el empleado verá su <b>portal</b> (vacaciones, préstamos, permisos y capacitaciones) en su perfil.
+          </p>
+          <div className="relative">
+            <SearchIcon className={`w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar usuario…" className={`${inp} pl-8`} />
+          </div>
+          <div className={`rounded-xl border max-h-64 overflow-auto divide-y ${isDark ? "border-white/[0.06] divide-white/[0.04]" : "border-slate-200 divide-slate-100"}`}>
+            <button type="button" onClick={() => setSel(null)}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm ${sel === null ? (isDark ? "bg-rose-500/10" : "bg-rose-50") : ""}`}>
+              <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${sel === null ? "bg-rose-500 border-rose-500" : isDark ? "border-white/20" : "border-slate-300"}`}>{sel === null && <CheckCircle2 className="w-3 h-3 text-white" />}</span>
+              <span className={isDark ? "text-slate-300" : "text-slate-600"}>Sin usuario (desvincular)</span>
+            </button>
+            {filtrados.map((u) => {
+              const ocupadoPorOtro = u.ya_vinculado && u.id !== emp.user_sistema;
+              return (
+                <button key={u.id} type="button" disabled={ocupadoPorOtro} onClick={() => setSel(u.id)}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm ${sel === u.id ? (isDark ? "bg-indigo-500/10" : "bg-indigo-50") : ""} ${ocupadoPorOtro ? "opacity-40 cursor-not-allowed" : ""}`}>
+                  <span className="inline-flex items-center gap-2 min-w-0">
+                    <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${sel === u.id ? "bg-indigo-500 border-indigo-500" : isDark ? "border-white/20" : "border-slate-300"}`}>{sel === u.id && <CheckCircle2 className="w-3 h-3 text-white" />}</span>
+                    <span className="min-w-0">
+                      <span className={`block font-bold truncate ${isDark ? "text-white" : "text-slate-900"}`}>{u.nombre}</span>
+                      <span className={`block text-[11px] truncate ${isDark ? "text-slate-500" : "text-slate-400"}`}>@{u.username}{u.email ? ` · ${u.email}` : ""}</span>
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[10px] font-bold uppercase">
+                    {ocupadoPorOtro ? <span className="text-amber-500">ocupado</span> : <span className={isDark ? "text-slate-500" : "text-slate-400"}>{u.rol}</span>}
+                  </span>
+                </button>
+              );
+            })}
+            {filtrados.length === 0 && <p className={`text-sm text-center py-4 ${isDark ? "text-slate-500" : "text-slate-400"}`}>Sin usuarios disponibles.</p>}
+          </div>
+        </div>
+        <div className={`px-5 py-3 border-t flex justify-end gap-2 shrink-0 ${isDark ? "border-white/[0.08]" : "border-slate-200"}`}>
+          <button onClick={onClose} className={`px-4 py-2 rounded-xl text-sm font-bold ${isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}>Cancelar</button>
+          <button onClick={() => guardar(sel)} disabled={busy} className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40 bg-gradient-to-r from-indigo-500 to-violet-600">{busy ? "Guardando…" : "Guardar vínculo"}</button>
+        </div>
+      </div>
     </div>
   );
 }

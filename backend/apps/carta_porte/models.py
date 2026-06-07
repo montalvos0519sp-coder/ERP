@@ -66,7 +66,11 @@ class Operador(models.Model):
     rfc = models.CharField(max_length=13)
     nombre = models.CharField(max_length=200)
     licencia = models.CharField(max_length=40)
+    licencia_vencimiento = models.DateField(null=True, blank=True)
     codigo_postal = models.CharField(max_length=10, blank=True)
+    # Vínculo con el empleado de RH (misma persona). Se sincroniza por RFC.
+    empleado = models.ForeignKey(
+        "rh.Empleado", on_delete=models.SET_NULL, null=True, blank=True, related_name="operadores")
     activo = models.BooleanField(default=True)
 
     class Meta:

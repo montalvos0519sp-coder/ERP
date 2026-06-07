@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle, ArrowLeft, Building2, CheckCircle, Eye, EyeOff,
-  RefreshCw, Save, Shield, Zap,
+  AlertTriangle, ArrowLeft, Building2, CheckCircle,
+  RefreshCw, Save, Zap,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -21,7 +21,6 @@ export default function ConfigNominaPage() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showSecret, setShowSecret] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; txt: string } | null>(null);
 
   useEffect(() => {
@@ -64,14 +63,16 @@ export default function ConfigNominaPage() {
         </Link>
 
         {/* Hero */}
-        <div className="rounded-2xl border border-violet-200/60 dark:border-violet-500/15 bg-gradient-to-br from-violet-50 via-indigo-50 to-blue-50 dark:from-violet-950/40 dark:via-indigo-950/30 dark:to-slate-900/40 p-5 sm:p-6 shadow-sm dark:backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-500/15 flex items-center justify-center ring-1 ring-violet-200 dark:ring-violet-400/30 shrink-0">
-              <Shield size={20} className="text-violet-600 dark:text-violet-300" />
+        <div className="relative overflow-hidden rounded-3xl p-6 shadow-xl" style={{ background: "linear-gradient(120deg,#10B981 0%,#14B8A6 50%,#0EA5E9 100%)" }}>
+          <div className="absolute -top-16 -right-10 w-64 h-64 rounded-full bg-white/10 blur-2xl pointer-events-none" />
+          <div className="absolute -bottom-20 left-1/3 w-72 h-72 rounded-full bg-black/10 blur-3xl pointer-events-none" />
+          <div className="relative flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm ring-1 ring-white/30 flex items-center justify-center shadow-lg shrink-0">
+              <Building2 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Configuracion PAC + Datos patronales</h1>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Credenciales para timbrar nomina (Factura.com) y datos del registro patronal.</p>
+              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Datos patronales de nómina</h1>
+              <p className="text-sm text-white/80">Registro patronal, riesgo de puesto y serie para los recibos de nómina.</p>
             </div>
           </div>
         </div>
@@ -87,58 +88,23 @@ export default function ConfigNominaPage() {
           </div>
         )}
 
-        {/* Seccion PAC */}
-        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] p-5 sm:p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <Zap size={16} className="text-emerald-500" />
-            <h2 className="text-base font-black uppercase tracking-tight text-slate-800 dark:text-white">PAC (Factura.com)</h2>
+        {/* Nota: el PAC se configura una sola vez a nivel empresa */}
+        <div className="bg-emerald-50 dark:bg-emerald-500/[0.08] border border-emerald-200 dark:border-emerald-500/30 rounded-2xl p-4 flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 flex items-center justify-center shrink-0 ring-1 ring-emerald-200/50 dark:ring-emerald-400/25">
+            <Zap size={18} />
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <Lbl>Proveedor</Lbl>
-              <select value={data.proveedor || "FACTURA_COM"} onChange={(e) => setField("proveedor", e.target.value)} className={inp}>
-                <option value="FACTURA_COM">Factura.com</option>
-                <option value="OTRO">Otro PAC</option>
-              </select>
-            </div>
-            <div>
-              <Lbl>Ambiente</Lbl>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => { setField("pac_sandbox", true); setField("pac_endpoint", "https://sandbox.factura.com"); }}
-                  className={`flex-1 px-3 py-2 text-xs font-bold rounded-xl border transition-colors ${data.pac_sandbox ? "bg-amber-500 text-white border-transparent" : "bg-white dark:bg-white/[0.04] border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300"}`}>
-                  Sandbox · Pruebas
-                </button>
-                <button type="button" onClick={() => { setField("pac_sandbox", false); setField("pac_endpoint", "https://api.factura.com"); }}
-                  className={`flex-1 px-3 py-2 text-xs font-bold rounded-xl border transition-colors ${!data.pac_sandbox ? "bg-rose-600 text-white border-transparent" : "bg-white dark:bg-white/[0.04] border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300"}`}>
-                  Produccion · LIVE
-                </button>
-              </div>
-            </div>
-            <div className="sm:col-span-2">
-              <Lbl>Endpoint base</Lbl>
-              <input value={data.pac_endpoint || ""} onChange={(e) => setField("pac_endpoint", e.target.value)} placeholder="https://sandbox.factura.com" className={inp} />
-            </div>
-            <div>
-              <Lbl>API Key (F-Api-Key)</Lbl>
-              <input value={data.pac_api_key || ""} onChange={(e) => setField("pac_api_key", e.target.value)} placeholder="F-PLUGIN-API-KEY" className={`${inp} font-mono`} />
-            </div>
-            <div>
-              <Lbl>Secret Key (F-Secret-Key)</Lbl>
-              <div className="relative">
-                <input type={showSecret ? "text" : "password"} value={data.pac_secret_key || ""} onChange={(e) => setField("pac_secret_key", e.target.value)}
-                  placeholder="F-PLUGIN-SECRET-KEY" className={`${inp} font-mono pr-10`} />
-                <button type="button" onClick={() => setShowSecret((s) => !s)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white">
-                  {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-            </div>
+          <div className="flex-1">
+            <p className="font-bold text-sm text-emerald-900 dark:text-emerald-200">El PAC se configura en la empresa</p>
+            <p className="text-xs text-emerald-700 dark:text-emerald-300/80 mt-1">
+              La nómina timbra con las mismas credenciales de Factura.com que las facturas y la Carta Porte.
+              Captúralas una sola vez en <Link href="/admin/configuracion" className="font-bold underline">Configuración de empresa</Link>.
+              Aquí solo defines los datos patronales para los recibos.
+            </p>
           </div>
         </div>
 
         {/* Seccion datos patronales */}
-        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] p-5 sm:p-6 space-y-4">
+        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] shadow-sm p-5 sm:p-6 space-y-4">
           <div className="flex items-center gap-2">
             <Building2 size={16} className="text-blue-500" />
             <h2 className="text-base font-black uppercase tracking-tight text-slate-800 dark:text-white">Datos patronales</h2>

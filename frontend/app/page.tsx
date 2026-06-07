@@ -340,7 +340,7 @@ function ModuleCard({ mod, isDark, index }: { mod: any; index: number; isDark: b
         <p className={`text-xs leading-relaxed ${d(isDark, "text-slate-400", "text-slate-500")}`}>{mod.desc}</p>
 
         <div className="flex flex-col gap-1.5 flex-1">
-          {mod.features.map((f, i) => {
+          {mod.features.map((f: any, i: number) => {
             const FIcon = f.icon;
             return (
               <div key={i} className="flex items-center gap-2">

@@ -1305,8 +1305,8 @@ function EditorInner() {
     () => (tool === "pan" || spacePressed ? PAN_DRAG_PAN_MODE : PAN_DRAG_NORMAL),
     [tool, spacePressed],
   );
-  const onInit = useCallback((inst: ReactFlowInstance) => {
-    rfInstanceRef.current = inst;
+  const onInit = useCallback((inst: ReactFlowInstance<Node<ShapeData>, Edge>) => {
+    rfInstanceRef.current = inst as unknown as ReactFlowInstance;
   }, []);
   const onSelectionChange = useCallback(
     ({ nodes: ns }: { nodes: Node[] }) => setSelectedIds(ns.map((n) => n.id)),

@@ -53,7 +53,7 @@ def _sueldo_operador(viaje: Viaje) -> Decimal:
     `sueldo_operador` al modelo Viaje en el futuro.
     """
     sueldo = getattr(viaje, "sueldo_operador", None)
-    if sueldo is not None:
+    if sueldo:
         return Decimal(sueldo)
     return (viaje.tarifa or Decimal("0")) * Decimal("0.10")
 
@@ -285,9 +285,9 @@ class ViajesPendientesView(viewsets.ViewSet):
         qs = (
             Viaje.objects.filter(
                 operador_id=operador_id,
-                fecha_salida__date__gte=fecha_inicio,
-                fecha_salida__date__lte=fecha_fin,
-                estado__in=["ENTREGADO", "EN_TRANSITO"],
+                fecha_viaje__date__gte=fecha_inicio,
+                fecha_viaje__date__lte=fecha_fin,
+                estado__in=["ENTREGADO", "EN_RUTA"],
             )
             .exclude(liquidacion_conceptos__isnull=False)
             .select_related("origen", "destino")[:200]
@@ -298,7 +298,7 @@ class ViajesPendientesView(viewsets.ViewSet):
                 "id": v.id,
                 "id_viaje": v.numero,
                 "folio_carga": v.numero,
-                "fecha_viaje": v.fecha_salida.date().isoformat() if v.fecha_salida else "",
+                "fecha_viaje": v.fecha_viaje.date().isoformat() if v.fecha_viaje else "",
                 "origen": getattr(v.origen, "nombre_lugar", str(v.origen)) if v.origen_id else "",
                 "destino": getattr(v.destino, "nombre_lugar", str(v.destino)) if v.destino_id else "",
                 "sueldo_operador": str(_sueldo_operador(v)),

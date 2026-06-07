@@ -296,34 +296,20 @@ function ChecadasModal({ open, onClose }: { open: boolean; onClose: () => void }
   );
 }
 
-// ─── Empleados por Empresa Card ────────────────────────────────────────────────
-
-const EMP_COLORS = ["#38bdf8","#a78bfa","#34d399","#fb923c","#f472b6","#facc15","#60a5fa","#4ade80","#f87171","#a3e635"];
+// ─── Empleados Card ────────────────────────────────────────────────────────────
 
 function EmpleadosEmpresaCard({
-  operadoresList,
+  nombreEmpresa,
   totalOperadores,
-  hiddenIds,
-  onToggle,
 }: {
-  operadoresList: { id?: number; nombre: string; total: number; color: string }[];
+  nombreEmpresa: string;
   totalOperadores: number;
-  hiddenIds: Set<number>;
-  onToggle: (id: number) => void;
 }) {
   const { isDarkMode } = useTheme();
-  const [showHidden, setShowHidden] = useState(false);
 
   const divider  = isDarkMode ? "rgba(255,255,255,0.08)" : "#e2e8f0";
   const labelCls = isDarkMode ? "text-slate-400" : "text-slate-500";
-
-  const visible = operadoresList.filter(e => e.id == null || !hiddenIds.has(e.id));
-  const hidden  = operadoresList.filter(e => e.id != null &&  hiddenIds.has(e.id));
-  const display = showHidden ? operadoresList : visible;
-
-  const cols = display.length === 0 ? 1
-    : display.length <= 2 ? 2
-    : display.length === 3 ? 3 : 2;
+  const accent   = "#38bdf8";
 
   return (
     <div
@@ -339,62 +325,24 @@ function EmpleadosEmpresaCard({
       )}
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-4 rounded-full" style={{ background: "linear-gradient(180deg,#38bdf8,#a78bfa)" }} />
-          <p className={`text-[11px] font-bold uppercase tracking-widest ${labelCls}`}>Empleados por Empresa</p>
-        </div>
-        {hidden.length > 0 && (
-          <button
-            onClick={() => setShowHidden(v => !v)}
-            className="text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors"
-            style={isDarkMode ? { color: "#94a3b8", background: "rgba(255,255,255,0.06)" } : { color: "#64748b", background: "#f1f5f9" }}
-          >
-            {showHidden ? "Ocultar" : `+${hidden.length} ocultas`}
-          </button>
-        )}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-1 h-4 rounded-full" style={{ background: "linear-gradient(180deg,#38bdf8,#a78bfa)" }} />
+        <p className={`text-[11px] font-bold uppercase tracking-widest ${labelCls}`}>Empleados</p>
       </div>
 
-      {/* ── Empresa tiles ── */}
-      {display.length === 0 ? (
-        <p className={`text-xs text-center py-4 ${labelCls}`}>
-          Sin empresas. Configura en <strong>Catálogos → Empresas</strong>.
-        </p>
-      ) : (
-        <div className="grid gap-2 mb-3" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
-          {display.map((e) => {
-            const isHidden = e.id != null && hiddenIds.has(e.id);
-            return (
-              <div key={e.nombre} className="relative group">
-                {e.id != null && (
-                  <button
-                    onClick={() => onToggle(e.id!)}
-                    className="absolute -top-1.5 -right-1.5 z-10 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                    style={{ background: isHidden ? "#22c55e" : "#64748b", color: "#fff" }}
-                    title={isHidden ? "Mostrar empresa" : "Ocultar empresa"}
-                  >
-                    <X size={10} />
-                  </button>
-                )}
-                <div
-                  className="text-center p-3 rounded-xl transition-opacity"
-                  style={{
-                    background: `${e.color}14`,
-                    border: `1px solid ${e.color}22`,
-                    opacity: isHidden ? 0.4 : 1,
-                  }}
-                >
-                  <p className="text-2xl font-black leading-none" style={{ color: e.color }}>{e.total}</p>
-                  <p className="text-[10px] font-bold mt-1 truncate"
-                    style={{ color: isDarkMode ? `${e.color}99` : `${e.color}cc` }} title={e.nombre}>
-                    {e.nombre}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
+      {/* ── Empresa tile ── */}
+      <div className="flex-1 flex items-center justify-center mb-3">
+        <div
+          className="text-center p-4 rounded-xl w-full"
+          style={{ background: `${accent}14`, border: `1px solid ${accent}22` }}
+        >
+          <p className="text-3xl font-black leading-none" style={{ color: accent }}>{totalOperadores}</p>
+          <p className="text-[11px] font-bold mt-1.5 truncate"
+            style={{ color: isDarkMode ? `${accent}99` : `${accent}cc` }} title={nombreEmpresa}>
+            {nombreEmpresa}
+          </p>
         </div>
-      )}
+      </div>
 
       {/* ── Footer ── */}
       <div className="flex justify-between items-center pt-2.5 mt-auto"
@@ -408,8 +356,6 @@ function EmpleadosEmpresaCard({
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
-const HIDDEN_KEY = "rh-hidden-empresas";
-
 export default function RHDashboard() {
   const [data, setData]         = useState<DashboardData | null>(null);
   const [empresas, setEmpresas] = useState<EmpresaCat[]>([]);
@@ -417,23 +363,6 @@ export default function RHDashboard() {
   const [error, setError]       = useState(false);
   const [activeTab, setActiveTab] = useState<"alertas" | "vacaciones" | "prestamos">("alertas");
   const [checadasOpen, setChecadasOpen] = useState(false);
-  const [hiddenIds, setHiddenIds] = useState<Set<number>>(new Set());
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(HIDDEN_KEY);
-      if (stored) setHiddenIds(new Set(JSON.parse(stored)));
-    } catch {}
-  }, []);
-
-  const handleToggleEmpresa = (id: number) => {
-    setHiddenIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...next])); } catch {}
-      return next;
-    });
-  };
 
   const load = async () => {
     setLoading(true); setError(false);
@@ -467,33 +396,15 @@ export default function RHDashboard() {
   const vacProg    = Math.min(100, Math.round(d.vacaciones_progreso ?? 0));
   const prestProg  = Math.min(100, Math.round(d.prestamos_progreso ?? 0));
 
-  // Build operadores list: prefer new API field, fall back to catalog empresas with legacy counts
-  const operadoresList: { id?: number; nombre: string; total: number; color: string }[] = (() => {
-    if (d.operadores_por_empresa?.length) {
-      return d.operadores_por_empresa.map((e, i) => ({
-        id:     e.empresa_id,
-        nombre: e.empresa,
-        total:  e.total,
-        color:  EMP_COLORS[i % EMP_COLORS.length],
-      }));
-    }
-    if (empresas.length) {
-      return empresas.map((e, i) => {
-        // Defensa: mi backend usa nombre_comercial, el original usaba nombre.
-        const nombreEmpresa = (e as any).nombre || (e as any).nombre_comercial || "—";
-        const n = nombreEmpresa.toUpperCase();
-        const legacy = n.includes("MIGMAR") ? (d.operadores_migmar ?? 0)
-          : n.includes("MARCO")             ? (d.operadores_marco  ?? 0)
-          : 0;
-        return { id: e.id, nombre: nombreEmpresa, total: legacy, color: EMP_COLORS[i % EMP_COLORS.length] };
-      });
-    }
-    return [
-      { nombre: "MIGMAR",   total: d.operadores_migmar ?? 0, color: EMP_COLORS[0] },
-      { nombre: "MARCO M.", total: d.operadores_marco  ?? 0, color: EMP_COLORS[1] },
-    ];
-  })();
-  const totalOperadores = operadoresList.reduce((s, e) => s + e.total, 0);
+  // ERP de empresa única: ya no se muestra un desglose comparativo por empresa.
+  // Se calcula únicamente el total de empleados (sumando lo que reporte el API)
+  // y el nombre de la empresa configurada para etiquetar la tarjeta.
+  const totalOperadores =
+    (d.operadores_por_empresa?.length
+      ? d.operadores_por_empresa.reduce((s, e) => s + (e.total ?? 0), 0)
+      : (d.operadores_migmar ?? 0) + (d.operadores_marco ?? 0)) || 0;
+  const nombreEmpresa =
+    (empresas[0] as any)?.nombre || (empresas[0] as any)?.nombre_comercial || "Empresa";
 
   const quickActions = [
     { icon: UserPlus,        label: "Nuevo\nEmpleado",          color: "#3b82f6", href: `/rh/empleados/nuevo` },
@@ -593,10 +504,8 @@ export default function RHDashboard() {
           />
 
           <EmpleadosEmpresaCard
-            operadoresList={operadoresList}
+            nombreEmpresa={nombreEmpresa}
             totalOperadores={totalOperadores}
-            hiddenIds={hiddenIds}
-            onToggle={handleToggleEmpresa}
           />
         </div>
 

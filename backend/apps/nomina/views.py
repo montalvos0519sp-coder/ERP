@@ -13,6 +13,7 @@ Flujo:
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from decimal import Decimal
 
@@ -31,12 +32,60 @@ from .models import (
 )
 from .pac_factura_com import (
     FacturaComClient, FacturaComError, construir_payload_factura_com,
+    construir_payload_payroll,
 )
 from .serializers import (
     BitacoraFiscalNominaSerializer, CFDINominaSerializer, ConceptoNominaSerializer,
     ConfigNominaEmpresaSerializer, IncidenciaNominaSerializer,
     NominaEmpleadoSerializer, PeriodoNominaSerializer,
 )
+
+
+def _buscar_registro(obj, employee_uid: str):
+    """Busca recursivamente el registro del empleado (por employee_uid) en la
+    respuesta de /payroll/{uid}/view."""
+    employee_uid = (employee_uid or "").strip()
+    encontrado = {}
+
+    def walk(o):
+        nonlocal encontrado
+        if isinstance(o, dict):
+            es_registro = "status_timbre" in o or "uuid" in o or "employee_uid" in o
+            match = (o.get("employee_uid") or "").strip() == employee_uid
+            if es_registro and (match or not employee_uid):
+                encontrado = o
+                return True
+            for v in o.values():
+                if walk(v):
+                    return True
+        elif isinstance(o, list):
+            for v in o:
+                if walk(v):
+                    return True
+        return False
+
+    walk(obj)
+    return encontrado
+
+
+def _esperar_item_nomina(client, batch_uid: str, employee_uid: str, intentos: int = 6, espera: float = 2.0):
+    """Consulta /payroll/{uid}/view hasta que el registro alcance un estado
+    terminal (uuid timbrado o status_timbre de error)."""
+    if not batch_uid:
+        return {}
+    item = {}
+    for i in range(intentos):
+        try:
+            data = client.ver_nomina(batch_uid)
+        except FacturaComError:
+            data = {}
+        item = _buscar_registro(data, employee_uid)
+        estado = (item.get("status_timbre") or "").lower()
+        if item.get("uuid") or estado in ("error", "timbrado", "cancelado"):
+            return item
+        if i < intentos - 1:
+            time.sleep(espera)
+    return item
 
 
 class _EmpresaScoped(viewsets.ModelViewSet):
@@ -244,18 +293,36 @@ class CFDINominaViewSet(viewsets.ModelViewSet):
         empresa = cfdi.empresa
         config = ConfigNominaEmpresa.objects.filter(empresa=empresa).first()
         if not config:
-            return Response({"detail": "Falta configurar el PAC."}, status=400)
-        if not (config.pac_api_key and config.pac_secret_key):
-            return Response({"detail": "PAC sin credenciales (API Key / Secret)."}, status=400)
+            return Response({"detail": "Falta configurar los datos patronales de nómina."}, status=400)
         if cfdi.estatus == "TIMBRADO":
             return Response({"detail": "Ya esta timbrado.", "uuid": cfdi.uuid}, status=400)
 
+        # Credenciales del PAC: las MISMAS que usan CP y facturas (config de empresa).
+        client = FacturaComClient.from_empresa(empresa)
+        if client is None:
+            return Response({"detail": "PAC sin credenciales. Captúralas en Configuración de empresa."}, status=400)
         n = cfdi.nomina_empleado
-        client = FacturaComClient.from_config(config)
-        payload = construir_payload_factura_com(empresa, config, n, cfdi)
+        emisor_cp = getattr(getattr(empresa, "config", None), "emisor_cp", "") or ""
+
+        # Factura.com timbra nómina por su API de payroll: grupo → empleado →
+        # /payroll/create (asíncrono) → se consulta el UUID resultante.
+        try:
+            grupo = client.grupo_uid(getattr(empresa, "razon_social", "") or "Nómina ERP")
+            emp_uid = client.sincronizar_empleado_payroll(
+                n.empleado, grupo, fallback_cp=emisor_cp, patronal=config.registro_patronal or "",
+            )
+            if not emp_uid:
+                return Response({"detail": "No se pudo registrar al empleado en el PAC (revisa RFC, CURP y NSS del empleado)."}, status=400)
+            payload = construir_payload_payroll(
+                empresa, config, n, grupo, emp_uid,
+                serie_name=client.serie_nomina_name(config.serie_default or "NOM"),
+            )
+        except FacturaComError as e:
+            return Response({"detail": f"No se pudo preparar la nómina en el PAC: {e}", "pac_payload": e.payload}, status=502)
+
         bitacora_kwargs = dict(cfdi=cfdi, accion="TIMBRAR", usuario=request.user, request_body=payload)
         try:
-            resp = client.timbrar_nomina(payload)
+            resp = client.crear_nomina(payload)
         except FacturaComError as e:
             BitacoraFiscalNomina.objects.create(
                 exitoso=False, error=str(e), response_body=e.payload or {}, **bitacora_kwargs,
@@ -266,26 +333,53 @@ class CFDINominaViewSet(viewsets.ModelViewSet):
             cfdi.save(update_fields=["estatus", "error_pac", "respuesta_pac"])
             return Response({"detail": str(e), "pac_payload": e.payload}, status=502)
 
-        # Mapeo (Factura.com puede devolver "UUID" o "data.UUID")
-        uuid = resp.get("UUID") or resp.get("uuid") or (resp.get("data") or {}).get("UUID")
-        cfdi.uuid = uuid or ""
-        cfdi.estatus = "TIMBRADO"
-        cfdi.fecha_timbrado = datetime.now()
-        cfdi.sello_sat = resp.get("SelloSAT") or (resp.get("data") or {}).get("SelloSAT") or ""
-        cfdi.sello_cfdi = resp.get("SelloCFDI") or (resp.get("data") or {}).get("SelloCFDI") or ""
-        cfdi.cadena_original = resp.get("CadenaOriginal") or ""
-        cfdi.no_certificado_sat = resp.get("NoCertificadoSAT") or ""
-        cfdi.xml = resp.get("xml") or resp.get("XML") or ""
-        cfdi.pdf_url = resp.get("pdf") or resp.get("PDF") or ""
-        cfdi.respuesta_pac = resp
-        cfdi.timbrado_por = request.user
-        cfdi.save()
-        config.folio_actual = (config.folio_actual or 0) + 1
-        config.save(update_fields=["folio_actual"])
-        BitacoraFiscalNomina.objects.create(
-            exitoso=True, response_body=resp, **bitacora_kwargs,
-        )
-        return Response(CFDINominaSerializer(cfdi).data)
+        if (resp.get("response") or "").lower() == "error":
+            msg = resp.get("message") or "Error del PAC al timbrar la nómina."
+            BitacoraFiscalNomina.objects.create(exitoso=False, error=msg, response_body=resp, **bitacora_kwargs)
+            cfdi.estatus = "ERROR"
+            cfdi.error_pac = msg
+            cfdi.respuesta_pac = resp
+            cfdi.save(update_fields=["estatus", "error_pac", "respuesta_pac"])
+            return Response({"detail": msg, "pac_payload": resp}, status=502)
+
+        batch_uid = resp.get("uid") or resp.get("UID") or ""
+        # La nómina se encola: consultamos el resultado para obtener el UUID.
+        item = _esperar_item_nomina(client, batch_uid, emp_uid) or {}
+        item_uid = item.get("uid") or item.get("UID") or ""
+        status_timbre = (item.get("status_timbre") or "").lower()
+        status_msg = item.get("status_message") or ""
+        cfdi.uuid = item.get("uuid") or item.get("UUID") or ""
+        cfdi.folio = str(item.get("folio") or cfdi.folio or "")
+        cfdi.serie = item.get("serie") or cfdi.serie
+        cfdi.respuesta_pac = {"create": resp, "item": item, "batch_uid": batch_uid, "payroll_item_uid": item_uid}
+
+        if cfdi.uuid:
+            cfdi.estatus = "TIMBRADO"
+            cfdi.fecha_timbrado = datetime.now()
+            cfdi.error_pac = ""
+            cfdi.timbrado_por = request.user
+            cfdi.save()
+            config.folio_actual = (config.folio_actual or 0) + 1
+            config.save(update_fields=["folio_actual"])
+            BitacoraFiscalNomina.objects.create(exitoso=True, response_body={"create": resp, "item": item}, **bitacora_kwargs)
+            return Response(CFDINominaSerializer(cfdi).data)
+
+        if status_timbre == "error":
+            cfdi.estatus = "ERROR"
+            cfdi.error_pac = status_msg or "El PAC rechazó el timbrado de la nómina."
+            cfdi.save(update_fields=["estatus", "error_pac", "serie", "folio", "respuesta_pac"])
+            BitacoraFiscalNomina.objects.create(exitoso=False, error=cfdi.error_pac, response_body={"create": resp, "item": item}, **bitacora_kwargs)
+            return Response({"detail": cfdi.error_pac, "pac_payload": item}, status=502)
+
+        # Aún en cola: se timbrará en breve.
+        cfdi.estatus = "EN_PROCESO"
+        cfdi.save(update_fields=["estatus", "serie", "folio", "respuesta_pac"])
+        BitacoraFiscalNomina.objects.create(exitoso=True, response_body={"create": resp, "item": item}, **bitacora_kwargs)
+        return Response({
+            "detail": "La nómina se envió a timbrado y está en proceso. Refresca en unos segundos.",
+            "estatus": "EN_PROCESO", "uid": batch_uid,
+            **CFDINominaSerializer(cfdi).data,
+        })
 
     @action(detail=True, methods=["post"])
     def cancelar(self, request, pk=None):
@@ -299,10 +393,15 @@ class CFDINominaViewSet(viewsets.ModelViewSet):
         if motivo == "01" and not sustituye:
             return Response({"detail": "Motivo 01 requiere folio_sustituye (UUID)."}, status=400)
 
-        config = ConfigNominaEmpresa.objects.filter(empresa=cfdi.empresa).first()
-        client = FacturaComClient.from_config(config)
+        client = FacturaComClient.from_empresa(cfdi.empresa)
+        if client is None:
+            return Response({"detail": "PAC sin credenciales. Captúralas en Configuración de empresa."}, status=400)
+        item_uid = (cfdi.respuesta_pac or {}).get("payroll_item_uid") or ""
         try:
-            resp = client.cancelar(cfdi.uuid, motivo=motivo, folio_sustituye=sustituye)
+            if item_uid:
+                resp = client.cancelar_nomina(item_uid, motivo=motivo, folio_sustituto=sustituye)
+            else:
+                resp = client.cancelar(cfdi.uuid, motivo=motivo, folio_sustituye=sustituye)
         except FacturaComError as e:
             BitacoraFiscalNomina.objects.create(
                 cfdi=cfdi, accion="CANCELAR", usuario=request.user,

@@ -89,7 +89,7 @@ export default function EncuestaPublicaPage() {
   );
 }
 
-function Pregunta({ p, value, onChange, color }: any) {
+function Pregunta({ p, value, onChange, color }: { p: any; value: any; onChange: (v: any) => void; color: string }) {
   const baseInp = "w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 outline-none focus:border-slate-400";
   if (p.tipo === "rating") {
     return (

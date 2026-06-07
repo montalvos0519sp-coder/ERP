@@ -19,6 +19,7 @@ class EmpleadoSerializer(serializers.ModelSerializer):
     """
     puesto_nombre = serializers.CharField(source="puesto.nombre", read_only=True)
     departamento_nombre = serializers.CharField(source="puesto.departamento.nombre", read_only=True)
+    user_sistema_nombre = serializers.SerializerMethodField()
     # Aliases legibles para el frontend que envia/lee con sufijo _id.
     puesto_id = serializers.PrimaryKeyRelatedField(
         source="puesto", queryset=Puesto.objects.all(), required=False, allow_null=True,
@@ -33,6 +34,12 @@ class EmpleadoSerializer(serializers.ModelSerializer):
         if obj.puesto_id and obj.puesto.departamento_id:
             return obj.puesto.departamento_id
         return None
+
+    def get_user_sistema_nombre(self, obj):
+        u = obj.user_sistema
+        if not u:
+            return None
+        return (u.get_full_name() or "").strip() or u.username
 
     def to_internal_value(self, data):
         # FormData manda `puesto_id` como string vacio cuando no hay seleccion;

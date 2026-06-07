@@ -7,7 +7,7 @@ import {
   ArrowLeft, Save, Plus, Trash2, AlertTriangle, CheckCircle, Eye,
   User, Briefcase, Home, Users, FileText, CreditCard, DollarSign,
   Truck, History, Download, FileArchive, Camera, RefreshCw, Clock,
-  Building2, Tag, Phone, X, Sparkles, ChevronRight, ChevronDown, Search, ExternalLink,
+  Building2, Phone, X, Sparkles, ChevronRight, ChevronDown, Search, ExternalLink,
 } from "lucide-react";
 import { api, API_BASE } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeContext";
@@ -618,69 +618,32 @@ function TabFamilia({ f, s, hijos, setHijos, colonias, cpLoading, cpNotFound }: 
   );
 }
 
-function TabOperativa({ f, setF, empresas, lugares }: {
+function TabOperativa({ f, setF, lugares }: {
   f: FormState; setF: React.Dispatch<React.SetStateAction<FormState>>;
-  empresas: SelectOption[]; lugares: SelectOption[];
+  lugares: SelectOption[];
 }) {
-  // División Operativa = empresas (multi-select chips)
-  const toggleDiv = (id: string) =>
-    setF(p => {
-      const a = p.empresas_ids;
-      const next = a.includes(id) ? a.filter(x => x !== id) : [...a, id];
-      // Ya no reseteamos `lugar_id` al cambiar empresas — el lugar es
-      // independiente y se elige libremente del catálogo de Lugares.
-      return { ...p, empresas_ids: next };
-    });
-
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-7 gap-5">
-
-      {/* ── División Operativa — empresas como chips ── */}
-      <div className="lg:col-span-3">
-        <Section icon={Tag} title="División Operativa" subtitle="Selecciona las empresas a las que pertenece">
-          <div className="flex flex-wrap gap-2">
-            {empresas.length > 0
-              ? empresas.map(o => {
-                  const on = f.empresas_ids.includes(String(o.id));
-                  return (
-                    <button key={o.id} type="button" onClick={() => toggleDiv(String(o.id))}
-                      className={`px-3 py-1.5 text-xs font-bold rounded-xl border-2 transition-all duration-200 ${on ? "text-white border-transparent shadow-md" : "bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-violet-300 hover:text-violet-600"}`}
-                      style={on ? { background: G, boxShadow: `0 4px 14px ${GLOW}` } : {}}>
-                      {o.nombre}
-                    </button>
-                  );
-                })
-              : <span className="text-xs text-slate-400 italic">Cargando empresas…</span>}
-          </div>
-        </Section>
+    <Section icon={Building2} title="Asignación de Empresa" subtitle="Lugar actual del empleado">
+      <div>
+        <Lbl>Lugar de operación</Lbl>
+        {/* Combobox del catálogo de Lugares con búsqueda integrada. */}
+        <Combobox
+          value={f.lugar_id}
+          onChange={(id: string) => setF(p => ({ ...p, lugar_id: id }))}
+          options={lugares.map((l: any) => ({
+            id: String(l.id),
+            label: String(l.nombre || ''),
+          }))}
+          placeholder="Buscar lugar en el catálogo…"
+          emptyHint="No se encontraron lugares con ese nombre"
+        />
+        {lugares.length === 0 && (
+          <p className="text-[11px] text-amber-500 mt-1">
+            El catálogo de lugares no tiene registros disponibles.
+          </p>
+        )}
       </div>
-
-      {/* ── Asignación — Combobox con búsqueda del catálogo Lugares ── */}
-      <div className="lg:col-span-4">
-        <Section icon={Building2} title="Asignación de Empresa" subtitle="Lugar actual del empleado">
-          <div>
-            <Lbl>Lugar de operación</Lbl>
-            {/* Combobox del catálogo de Lugares con búsqueda integrada.
-                Siempre visible — independiente de las divisiones seleccionadas. */}
-            <Combobox
-              value={f.lugar_id}
-              onChange={(id: string) => setF(p => ({ ...p, lugar_id: id }))}
-              options={lugares.map((l: any) => ({
-                id: String(l.id),
-                label: String(l.nombre || ''),
-              }))}
-              placeholder="Buscar lugar en el catálogo…"
-              emptyHint="No se encontraron lugares con ese nombre"
-            />
-            {lugares.length === 0 && (
-              <p className="text-[11px] text-amber-500 mt-1">
-                El catálogo de lugares no tiene registros disponibles.
-              </p>
-            )}
-          </div>
-        </Section>
-      </div>
-    </div>
+    </Section>
   );
 }
 
@@ -1011,6 +974,16 @@ export default function EmpleadoForm({ mode, id }: { mode: "nuevo" | "editar"; i
       api.getCatLugares().then((d: unknown) => setLugares(toArr(d))).catch(() => {}),
     ]);
   }, []);
+
+  // Auto-asignación a la(s) empresa(s) disponible(s). El ERP opera con una sola
+  // empresa, por lo que ya no se elige manualmente: si `empresas_ids` está vacío
+  // y el catálogo de empresas ya cargó, se asignan todas las disponibles.
+  useEffect(() => {
+    if (empresas.length === 0) return;
+    setForm(p => p.empresas_ids.length > 0
+      ? p
+      : { ...p, empresas_ids: empresas.map(e => String(e.id)) });
+  }, [empresas]);
 
   useEffect(() => {
     const p = puestos.find(x => String(x.id) === form.puesto_id);
@@ -1489,7 +1462,7 @@ export default function EmpleadoForm({ mode, id }: { mode: "nuevo" | "editar"; i
               <div key={tabKey} className="anim-fadeslide">
                 {tab === "personal"    && <TabPersonal f={form} s={s} errFields={errFields} />}
                 {tab === "familia"     && <TabFamilia f={form} s={s} hijos={hijos} setHijos={setHijos} colonias={colonias} cpLoading={cpLoading} cpNotFound={cpNotFound} />}
-                {tab === "operativa"   && <TabOperativa f={form} setF={setForm} empresas={empresas} lugares={lugares} />}
+                {tab === "operativa"   && <TabOperativa f={form} setF={setForm} lugares={lugares} />}
                 {tab === "contratos"   && <TabContratos contratos={contratos} setContratos={setContratos} />}
                 {tab === "salario"     && <TabSalario salarios={salarios} setSalarios={setSalarios} />}
                 {tab === "bancarios"   && <TabBancarios f={form} s={s} setF={setForm} />}

@@ -201,6 +201,9 @@ class Documento(models.Model):
     )
     titulo = models.CharField(max_length=200)
     descripcion = models.TextField(blank=True)
+    # Cuerpo editable del documento redactado dentro del sistema (p. ej. los
+    # generados desde una plantilla). Complementa o sustituye al archivo adjunto.
+    contenido = models.TextField(blank=True)
     version = models.CharField(max_length=10, default="1.0")
     estado = models.CharField(max_length=15, choices=ESTADO_CHOICES, default=ESTADO_BORRADOR, db_index=True)
 

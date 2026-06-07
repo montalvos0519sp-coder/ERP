@@ -137,15 +137,33 @@ class FacturaComBackend(PacBackend):
         ok = data.get("response") == "success"
         return ResultadoTimbrado(ok=ok, raw=data, folio_fiscal=folio_fiscal)
 
-    def descargar_xml(self, folio_fiscal: str) -> bytes:
-        url = f"{self._base()}/v4/cfdi40/{folio_fiscal}/xml"
+    def _descargar(self, folio_fiscal: str, tipo: str, firma: bytes) -> bytes:
+        """Descarga xml/pdf del CFDI. Factura.com devuelve el archivo crudo o un
+        JSON con el contenido en base64 (data.Content)."""
+        import base64
+        url = f"{self._base()}/v4/cfdi40/{folio_fiscal}/{tipo}"
         res = requests.get(url, headers=self._headers(), timeout=45, verify=self._verify_ssl())
-        return res.content
+        if res.status_code != 200:
+            return b""
+        if res.content[:len(firma)] == firma:
+            return res.content
+        try:
+            datos = res.json()
+        except Exception:
+            return res.content
+        contenido = (datos.get("data") or {}).get("Content") if isinstance(datos, dict) else None
+        if contenido:
+            try:
+                return base64.b64decode(contenido)
+            except Exception:
+                return b""
+        return b""
+
+    def descargar_xml(self, folio_fiscal: str) -> bytes:
+        return self._descargar(folio_fiscal, "xml", b"<?xml")
 
     def descargar_pdf(self, folio_fiscal: str) -> bytes:
-        url = f"{self._base()}/v4/cfdi40/{folio_fiscal}/pdf"
-        res = requests.get(url, headers=self._headers(), timeout=45, verify=self._verify_ssl())
-        return res.content
+        return self._descargar(folio_fiscal, "pdf", b"%PDF")
 
     def descargar_xml_pago(self, folio_fiscal: str) -> bytes:
         return self.descargar_xml(folio_fiscal)

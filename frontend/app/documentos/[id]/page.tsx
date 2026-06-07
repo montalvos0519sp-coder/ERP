@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle, ArrowLeft, Calendar, CheckCircle2, Clock, Download, FileText,
   History, Lightbulb, Plus, Send, ShieldCheck, ShieldX, Sparkles, Upload,
-  UploadCloud, UserCheck, Users as UsersIcon, X,
+  UploadCloud, UserCheck, Users as UsersIcon, X, Trash2, FileType2,
+  ZoomIn, ZoomOut, Maximize2, RotateCcw, Printer,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useUser } from "@/lib/UserContext";
+import { DocSheet, DocEditor } from "@/components/documentos/DocWord";
 
 interface PasoSolicitud {
   id: number; orden: number; aprobador: number;
@@ -44,6 +46,7 @@ interface DocumentoDetalle {
   codigo: string;
   titulo: string;
   descripcion: string;
+  contenido: string;
   version: string;
   estado: string;
   archivo: string;
@@ -89,6 +92,14 @@ export default function DocumentoDetallePage() {
   const [propuestas, setPropuestas] = useState<Propuesta[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [wordBusy, setWordBusy] = useState(false);
+
+  // Edición del contenido redactado en el sistema (documentos sin archivo).
+  const [editando, setEditando] = useState(false);
+  const [borrador, setBorrador] = useState({ titulo: "", contenido: "" });
+  const [guardando, setGuardando] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [ampliado, setAmpliado] = useState(false);
 
   // Modales
   const [showEnviar, setShowEnviar] = useState(false);
@@ -118,10 +129,39 @@ export default function DocumentoDetallePage() {
       .then((r) => setFlujos(r.results || [])).catch(() => {});
   }, [doc?.empresa]);
 
+  // Si venimos de "generar desde plantilla" (?nuevo=1), abre el editor de una vez.
+  useEffect(() => {
+    if (!doc) return;
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("nuevo") === "1"
+        && doc.estado === "BORRADOR" && !editando) {
+      setBorrador({ titulo: doc.titulo, contenido: doc.contenido || "" });
+      setEditando(true);
+    }
+  }, [doc]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const abrirEditor = () => {
+    if (!doc) return;
+    setBorrador({ titulo: doc.titulo, contenido: doc.contenido || "" });
+    setEditando(true);
+  };
+
+  const guardarContenido = async () => {
+    if (!borrador.titulo.trim()) { alert("El título no puede estar vacío."); return; }
+    setGuardando(true);
+    try {
+      await api.actualizarDocumento(id, { titulo: borrador.titulo, contenido: borrador.contenido });
+      setEditando(false);
+      await cargar();
+    } catch (e) { alert((e as Error).message); }
+    finally { setGuardando(false); }
+  };
+
   if (loading) return <div className={`p-10 ${theme.textTertiary}`}>Cargando…</div>;
   if (!doc) return <div className={`p-10 ${theme.textTertiary}`}>Documento no encontrado.</div>;
 
   const esCreador = user && doc.creado_por === user.id;
+  const puedeEditar = (esCreador || user?.is_superuser) && (doc.estado === "BORRADOR" || doc.estado === "RECHAZADO");
+  const tieneContenido = !!(doc.contenido && doc.contenido.trim());
   const miPaso = doc.solicitud_activa?.pasos.find(
     (p) => p.aprobador === user?.id && p.estado === "PENDIENTE",
   );
@@ -159,76 +199,156 @@ export default function DocumentoDetallePage() {
     finally { setBusy(false); }
   };
 
+  const eliminar = async () => {
+    if (!doc) return;
+    if (!confirm(`¿Eliminar el borrador "${doc.codigo} · ${doc.titulo}"? Esta acción no se puede deshacer.`)) return;
+    setBusy(true);
+    try { await api.eliminarDocumento(id); router.push("/documentos"); }
+    catch (e) { alert((e as Error).message); setBusy(false); }
+  };
+
+  const card = isDarkMode ? "bg-[#0F172A]/70 border-white/[0.05]" : "bg-white border-slate-200/70";
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-start gap-3">
-        <button onClick={() => router.push("/documentos")}
-          className={`w-10 h-10 rounded-xl flex items-center justify-center ${theme.accentHover}`}>
-          <ArrowLeft className={`w-4 h-4 ${theme.textSecondary}`} />
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-              {doc.tipo_codigo} · {doc.tipo_categoria}
-            </span>
-            <EstadoBadge estado={doc.estado} />
-            {doc.departamento_nombre && (
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                isDarkMode ? "bg-slate-700 text-slate-300" : "bg-slate-100 text-slate-600"
-              }`}>{doc.departamento_nombre}</span>
-            )}
+      {/* Hero */}
+      <div className={`relative overflow-hidden rounded-3xl border ${card}`}>
+        <div className="absolute inset-0 opacity-[0.08] pointer-events-none"
+          style={{ background: "radial-gradient(circle at 10% 20%, #2563EB 0, transparent 40%), radial-gradient(circle at 90% 80%, #6366F1 0, transparent 42%)" }} />
+        <div className="relative p-6">
+          <div className="flex items-start gap-3">
+            <button onClick={() => router.push("/documentos")}
+              className={`p-2 rounded-xl border shrink-0 ${isDarkMode ? "border-white/[0.08] hover:bg-white/[0.05]" : "border-slate-200 hover:bg-slate-50"} transition`}>
+              <ArrowLeft className={`w-4 h-4 ${theme.textSecondary}`} />
+            </button>
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shrink-0 bg-gradient-to-br from-blue-500 via-indigo-500 to-indigo-600">
+              <FileText className="w-7 h-7 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                  {doc.tipo_codigo} · {doc.tipo_categoria}
+                </span>
+                <EstadoBadge estado={doc.estado} />
+                {doc.departamento_nombre && (
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${isDarkMode ? "bg-slate-700 text-slate-300" : "bg-slate-100 text-slate-600"}`}>{doc.departamento_nombre}</span>
+                )}
+                <span className={`text-xs font-mono ${theme.textTertiary}`}>{doc.codigo} · v{doc.version}</span>
+              </div>
+              <h1 className={`text-2xl lg:text-3xl font-black tracking-tight ${theme.textPrimary}`}>{doc.titulo}</h1>
+              {doc.descripcion && <p className={`text-sm mt-1 max-w-2xl ${theme.textSecondary}`}>{doc.descripcion}</p>}
+            </div>
+            <div className="flex flex-col gap-1.5 shrink-0">
+              {doc.puede_descargar && doc.archivo_url && (
+                <a href={api.descargarDocumentoUrl(id)} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:shadow-lg text-white text-sm font-bold transition">
+                  <Download className="w-4 h-4" /> Descargar
+                </a>
+              )}
+              {tieneContenido && (
+                <button
+                  onClick={async () => { setWordBusy(true); try { await api.descargarDocumentoWord(id); } catch (e) { alert((e as Error).message); } finally { setWordBusy(false); } }}
+                  disabled={wordBusy}
+                  className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border text-sm font-bold transition disabled:opacity-50 ${isDarkMode ? "border-sky-400/30 text-sky-300 hover:bg-sky-500/10" : "border-sky-300 text-sky-600 hover:bg-sky-50"}`}>
+                  <FileType2 className={`w-4 h-4 ${wordBusy ? "animate-pulse" : ""}`} /> {wordBusy ? "Generando…" : "Descargar Word"}
+                </button>
+              )}
+            </div>
           </div>
-          <div className={`text-xs font-mono ${theme.textTertiary}`}>{doc.codigo} · v{doc.version}</div>
-          <h1 className={`text-2xl font-black mt-0.5 ${theme.textPrimary}`}>{doc.titulo}</h1>
-          {doc.descripcion && <p className={`text-sm mt-1 ${theme.textSecondary}`}>{doc.descripcion}</p>}
-        </div>
-        <div className="flex flex-col gap-1.5">
-          {doc.puede_descargar && doc.archivo_url && (
-            <a href={api.descargarDocumentoUrl(id)} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold">
-              <Download className="w-4 h-4" /> Descargar
-            </a>
-          )}
+          {/* Ciclo de vida del documento */}
+          <div className="mt-5">
+            <CicloVidaDoc estado={doc.estado} theme={theme} isDark={isDarkMode} />
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Visor + meta */}
         <div className="lg:col-span-2 space-y-5">
-          {/* Visor */}
+          {/* Visor / Editor del documento */}
           <div className={`rounded-2xl border overflow-hidden ${
             isDarkMode ? "bg-[#0F172A]/70 border-white/[0.06]" : "bg-white border-slate-200/70"
           }`}>
-            <div className={`flex items-center justify-between px-4 py-2 border-b ${
+            <div className={`flex items-center justify-between gap-2 px-4 py-2 border-b ${
               isDarkMode ? "border-white/[0.06]" : "border-slate-200"
             }`}>
-              <div className={`text-xs font-bold ${theme.textSecondary}`}>Vista del documento</div>
-              <div className={`text-[10px] ${theme.textTertiary}`}>
-                {doc.archivo_nombre_original || "—"} · {Math.round(doc.archivo_tamano / 1024)} KB
+              <div className={`text-xs font-bold ${theme.textSecondary}`}>
+                {editando ? "Editando documento" : (tieneContenido ? "Contenido del documento" : "Vista del documento")}
+              </div>
+              <div className="flex items-center gap-2">
+                {!editando && tieneContenido && (
+                  <span className={`text-[10px] ${theme.textTertiary}`}>{doc.contenido.length} caracteres</span>
+                )}
+                {!editando && doc.archivo_url && !tieneContenido && (
+                  <span className={`text-[10px] ${theme.textTertiary}`}>{doc.archivo_nombre_original || "—"} · {Math.round(doc.archivo_tamano / 1024)} KB</span>
+                )}
+                {!editando && tieneContenido && (
+                  <div className={`inline-flex items-center rounded-lg border overflow-hidden ${isDarkMode ? "border-white/[0.08]" : "border-slate-200"}`}>
+                    <button onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.1).toFixed(2)))} title="Alejar" className={`p-1.5 ${isDarkMode ? "text-slate-300 hover:bg-white/[0.06]" : "text-slate-600 hover:bg-slate-100"}`}><ZoomOut className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setZoom(1)} title="Restablecer zoom" className={`px-1.5 text-[10px] font-black tabular-nums ${theme.textSecondary}`}>{Math.round(zoom * 100)}%</button>
+                    <button onClick={() => setZoom((z) => Math.min(1.6, +(z + 0.1).toFixed(2)))} title="Acercar" className={`p-1.5 ${isDarkMode ? "text-slate-300 hover:bg-white/[0.06]" : "text-slate-600 hover:bg-slate-100"}`}><ZoomIn className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => window.print()} title="Imprimir" className={`p-1.5 border-l ${isDarkMode ? "border-white/[0.08] text-slate-300 hover:bg-white/[0.06]" : "border-slate-200 text-slate-600 hover:bg-slate-100"}`}><Printer className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setAmpliado(true)} title="Pantalla completa" className={`p-1.5 border-l ${isDarkMode ? "border-white/[0.08] text-slate-300 hover:bg-white/[0.06]" : "border-slate-200 text-slate-600 hover:bg-slate-100"}`}><Maximize2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                )}
+                {!editando && puedeEditar && (tieneContenido || !doc.archivo_url) && (
+                  <button onClick={abrirEditor}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold">
+                    <Sparkles className="w-3 h-3" /> Editar contenido
+                  </button>
+                )}
               </div>
             </div>
-            <div className="h-[600px] bg-slate-900/40">
-              {doc.archivo_url && doc.archivo_mime.includes("pdf") ? (
-                <iframe
-                  src={`${api.descargarDocumentoUrl(id)}#view=FitH`}
-                  className="w-full h-full"
-                  title="Visor PDF"
-                />
-              ) : doc.archivo_url && doc.archivo_mime.startsWith("image/") ? (
-                <img src={api.descargarDocumentoUrl(id)} alt={doc.titulo}
-                  className="w-full h-full object-contain" />
-              ) : (
-                <div className="h-full flex items-center justify-center flex-col gap-2 text-slate-400">
-                  <FileText className="w-16 h-16" />
-                  <p className="text-sm">Vista previa no disponible para este formato.</p>
-                  {doc.puede_descargar && (
-                    <a href={api.descargarDocumentoUrl(id)} target="_blank" rel="noopener noreferrer"
-                      className="text-sm text-blue-400 hover:underline">Descargar para ver</a>
-                  )}
+
+            {editando ? (
+              /* ── Editor profesional: barra + texto + vista previa en vivo ── */
+              <div className="p-4 space-y-3">
+                <div>
+                  <label className={`text-[10px] font-black uppercase tracking-wider ${theme.textTertiary}`}>Título del documento</label>
+                  <input value={borrador.titulo} onChange={(e) => setBorrador((b) => ({ ...b, titulo: e.target.value }))}
+                    className={`w-full mt-1 px-3 py-2 rounded-lg border text-sm outline-none ${isDarkMode ? "bg-[#1E293B]/60 border-white/[0.08] text-white" : "bg-white border-slate-200 text-slate-900"}`} />
                 </div>
-              )}
-            </div>
+
+                <DocEditor value={borrador.contenido} onChange={(v) => setBorrador((b) => ({ ...b, contenido: v }))} isDark={isDarkMode} theme={theme} rows={26} />
+
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={() => setEditando(false)} disabled={guardando}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold ${isDarkMode ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}>Cancelar</button>
+                  <button onClick={guardarContenido} disabled={guardando}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-40">
+                    <CheckCircle2 className="w-4 h-4" /> {guardando ? "Guardando…" : "Guardar"}
+                  </button>
+                </div>
+              </div>
+            ) : tieneContenido ? (
+              /* ── Lectura del contenido como hoja de documento Word ── */
+              <div className={`max-h-[720px] overflow-auto p-6 ${isDarkMode ? "bg-[#0a0f1c]" : "bg-slate-200/70"}`}>
+                <div style={{ zoom: zoom }}>
+                  <DocSheet contenido={doc.contenido} />
+                </div>
+              </div>
+            ) : (
+              /* ── Visor de archivo ── */
+              <div className="h-[600px] bg-slate-900/40">
+                {doc.archivo_url && doc.archivo_mime.includes("pdf") ? (
+                  <iframe src={`${api.descargarDocumentoUrl(id)}#view=FitH`} className="w-full h-full" title="Visor PDF" />
+                ) : doc.archivo_url && doc.archivo_mime.startsWith("image/") ? (
+                  <img src={api.descargarDocumentoUrl(id)} alt={doc.titulo} className="w-full h-full object-contain" />
+                ) : (
+                  <div className="h-full flex items-center justify-center flex-col gap-2 text-slate-400">
+                    <FileText className="w-16 h-16" />
+                    <p className="text-sm">Este documento aún no tiene contenido ni archivo.</p>
+                    {puedeEditar && (
+                      <button onClick={abrirEditor} className="text-sm text-blue-400 hover:underline">Redactar contenido</button>
+                    )}
+                    {doc.puede_descargar && doc.archivo_url && (
+                      <a href={api.descargarDocumentoUrl(id)} target="_blank" rel="noopener noreferrer"
+                        className="text-sm text-blue-400 hover:underline">Descargar para ver</a>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Propuestas de mejora */}
@@ -300,6 +420,12 @@ export default function DocumentoDetallePage() {
                   Marcar obsoleto
                 </button>
               </>
+            )}
+            {(esCreador || user?.is_superuser) && (doc.estado === "BORRADOR" || doc.estado === "RECHAZADO") && (
+              <button onClick={eliminar} disabled={busy}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-rose-500/40 text-rose-500 hover:bg-rose-500/10 text-sm font-bold disabled:opacity-40">
+                <Trash2 className="w-4 h-4" /> Eliminar borrador
+              </button>
             )}
           </div>
 
@@ -412,6 +538,88 @@ export default function DocumentoDetallePage() {
         <PropuestaModal documentoId={Number(id)} onClose={() => setShowPropuesta(false)}
           onCreated={() => { setShowPropuesta(false); cargar(); }} />
       )}
+
+      {/* Lector a pantalla completa */}
+      {ampliado && doc && (
+        <div className="fixed inset-0 z-[500] flex flex-col bg-slate-800/95 backdrop-blur-sm">
+          <div className="flex items-center justify-between gap-3 px-5 py-3 bg-slate-900 text-white shrink-0">
+            <div className="min-w-0">
+              <h2 className="text-sm font-black truncate flex items-center gap-2"><FileText className="w-4 h-4 shrink-0" /> {doc.titulo}</h2>
+              <span className="font-mono text-[10px] text-white/60">{doc.codigo} · v{doc.version}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="inline-flex items-center rounded-lg border border-white/15 overflow-hidden">
+                <button onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.1).toFixed(2)))} title="Alejar" className="p-2 text-white/80 hover:bg-white/10"><ZoomOut className="w-4 h-4" /></button>
+                <button onClick={() => setZoom(1)} className="px-2 text-[11px] font-black tabular-nums text-white/80">{Math.round(zoom * 100)}%</button>
+                <button onClick={() => setZoom((z) => Math.min(1.6, +(z + 0.1).toFixed(2)))} title="Acercar" className="p-2 text-white/80 hover:bg-white/10"><ZoomIn className="w-4 h-4" /></button>
+                <button onClick={() => setZoom(1)} title="Restablecer" className="p-2 text-white/80 hover:bg-white/10 border-l border-white/15"><RotateCcw className="w-4 h-4" /></button>
+              </div>
+              <button onClick={() => window.print()} title="Imprimir" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold"><Printer className="w-4 h-4" /> Imprimir</button>
+              <button onClick={async () => { setWordBusy(true); try { await api.descargarDocumentoWord(id); } catch (e) { alert((e as Error).message); } finally { setWordBusy(false); } }} disabled={wordBusy}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold disabled:opacity-50"><FileType2 className="w-4 h-4" /> Word</button>
+              <button onClick={() => setAmpliado(false)} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-8">
+            <div style={{ zoom: zoom }}>
+              <DocSheet contenido={doc.contenido} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Área e impresión aislada: al imprimir solo se ve la hoja del documento */}
+      {doc && tieneContenido && (
+        <>
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              body { background: #fff !important; }
+              body * { visibility: hidden !important; }
+              .doc-print-area, .doc-print-area * { visibility: visible !important; }
+              .doc-print-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; zoom: 1 !important; }
+              .doc-print-area > div { box-shadow: none !important; max-width: 100% !important; }
+              @page { margin: 1.4cm; }
+            }
+          ` }} />
+          <div className="doc-print-area" aria-hidden style={{ position: "fixed", left: "-10000px", top: 0 }}>
+            <DocSheet contenido={doc.contenido} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Ciclo de vida del documento controlado (ISO 7.5): muestra en qué etapa está.
+function CicloVidaDoc({ estado, theme, isDark }: { estado: string; theme: any; isDark: boolean }) {
+  const FLUJO = [
+    { id: "BORRADOR", label: "Borrador", icon: FileText, color: "#94A3B8" },
+    { id: "EN_REVISION", label: "En revisión", icon: Clock, color: "#F59E0B" },
+    { id: "VIGENTE", label: "Vigente", icon: CheckCircle2, color: "#10B981" },
+  ];
+  const obsoleto = estado === "OBSOLETO";
+  const rechazado = estado === "RECHAZADO";
+  const idx = FLUJO.findIndex((f) => f.id === estado);
+  return (
+    <div className="flex items-center gap-1 max-w-xl">
+      {FLUJO.map((f, i) => {
+        const done = !obsoleto && !rechazado && idx >= i;
+        const actual = estado === f.id;
+        return (
+          <div key={f.id} className="flex items-center flex-1">
+            <div className="flex flex-col items-center flex-1">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition ${actual ? "ring-2" : ""}`}
+                style={{ background: done ? f.color : (isDark ? "#ffffff10" : "#0000000a"), color: done ? "#fff" : (isDark ? "#64748b" : "#94a3b8"), ...(actual ? { boxShadow: `0 0 0 2px ${f.color}55` } : {}) }}>
+                <f.icon className="w-4 h-4" />
+              </div>
+              <span className={`text-[9px] font-bold mt-1 ${done ? theme.textPrimary : theme.textTertiary}`}>{f.label}</span>
+            </div>
+            {i < FLUJO.length - 1 && <div className="h-0.5 flex-1 mb-4" style={{ background: (!obsoleto && !rechazado && idx > i) ? FLUJO[i + 1].color : (isDark ? "#ffffff14" : "#0000000d") }} />}
+          </div>
+        );
+      })}
+      {obsoleto && <span className="ml-3 text-[11px] font-bold text-zinc-400 inline-flex items-center gap-1 mb-4"><ShieldX className="w-3.5 h-3.5" /> Obsoleto</span>}
+      {rechazado && <span className="ml-3 text-[11px] font-bold text-rose-500 inline-flex items-center gap-1 mb-4"><ShieldX className="w-3.5 h-3.5" /> Rechazado</span>}
     </div>
   );
 }

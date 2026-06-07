@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle, ArrowLeft, CheckCircle, Download, FileText, RefreshCw,
+  AlertTriangle, ArrowLeft, CheckCircle, Clock, Download, FileText, RefreshCw,
   Search, Trash2, XCircle,
 } from "lucide-react";
 
@@ -61,11 +61,18 @@ export default function CFDIsPage() {
           <ArrowLeft size={13} /> Panel de nomina
         </Link>
 
-        <div className="rounded-2xl border border-blue-200/60 dark:border-blue-500/15 bg-gradient-to-br from-blue-50 via-indigo-50 to-cyan-50 dark:from-blue-950/40 dark:via-indigo-950/30 dark:to-slate-900/40 p-5 sm:p-6 dark:backdrop-blur-xl">
-          <h1 className="text-2xl font-black text-slate-800 dark:text-white flex items-center gap-2">
-            <FileText className="text-blue-500" /> CFDI de Nomina
-          </h1>
-          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">UUIDs emitidos, descarga XML/PDF, cancelacion con motivos SAT.</p>
+        <div className="relative overflow-hidden rounded-3xl p-6 shadow-xl" style={{ background: "linear-gradient(120deg,#10B981 0%,#14B8A6 50%,#0EA5E9 100%)" }}>
+          <div className="absolute -top-16 -right-10 w-64 h-64 rounded-full bg-white/10 blur-2xl pointer-events-none" />
+          <div className="absolute -bottom-20 left-1/3 w-72 h-72 rounded-full bg-black/10 blur-3xl pointer-events-none" />
+          <div className="relative flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm ring-1 ring-white/30 flex items-center justify-center shadow-lg shrink-0">
+              <FileText className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">CFDI de Nomina</h1>
+              <p className="text-sm text-white/80">UUIDs emitidos, descarga XML/PDF, cancelacion con motivos SAT.</p>
+            </div>
+          </div>
         </div>
 
         {msg && (
@@ -89,27 +96,29 @@ export default function CFDIsPage() {
             { v: "ERROR", l: "Errores", c: "#F97316" },
           ].map((e) => (
             <button key={e.v} onClick={() => setEstatus(e.v)}
-              className="px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all"
+              className="px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all hover:-translate-y-0.5"
               style={{
-                background: estatus === e.v ? e.c : "rgba(255,255,255,0)",
-                color: estatus === e.v ? "#fff" : "#94a3b8",
-                border: estatus === e.v ? "none" : "1px solid rgba(148,163,184,0.3)",
+                background: estatus === e.v ? e.c : e.c + "14",
+                color: estatus === e.v ? "#fff" : e.c,
+                border: estatus === e.v ? "none" : `1px solid ${e.c}33`,
+                boxShadow: estatus === e.v ? "0 4px 12px -4px " + e.c + "99" : "none",
               }}>{e.l}</button>
           ))}
           <div className="flex-1 min-w-[180px]">
             <div className="relative">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") load(); }}
                 placeholder="Buscar UUID, folio, empleado..."
-                className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/60 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30" />
+                className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/60 text-slate-900 dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
             </div>
           </div>
-          <button onClick={load} className="px-3 py-2 text-xs font-bold rounded-lg bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 dark:text-slate-300">
+          <button onClick={load} title="Refrescar"
+            className="px-3 py-2.5 text-xs font-bold rounded-xl bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
 
-        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] overflow-hidden">
+        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] shadow-sm overflow-hidden">
           {loading ? (
             <div className="p-8 text-center text-sm text-slate-400">Cargando...</div>
           ) : data.length === 0 ? (
@@ -120,26 +129,27 @@ export default function CFDIsPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
-                <thead className="bg-slate-50 dark:bg-white/[0.02]">
-                  <tr className="text-[9px] uppercase tracking-widest text-slate-400 font-bold">
-                    <th className="px-3 py-2 text-left">Estatus</th>
-                    <th className="px-3 py-2 text-left">UUID</th>
-                    <th className="px-3 py-2 text-left">Serie-Folio</th>
-                    <th className="px-3 py-2 text-left">Empleado</th>
-                    <th className="px-3 py-2 text-left">Periodo</th>
-                    <th className="px-3 py-2 text-right">Total</th>
-                    <th className="px-3 py-2 text-left">Timbrado</th>
-                    <th className="px-3 py-2 text-right">Acciones</th>
+                <thead className="bg-slate-50 dark:bg-white/[0.02] border-b border-slate-100 dark:border-white/[0.04]">
+                  <tr className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                    <th className="px-3 py-3 text-left">Estatus</th>
+                    <th className="px-3 py-3 text-left">UUID</th>
+                    <th className="px-3 py-3 text-left">Serie-Folio</th>
+                    <th className="px-3 py-3 text-left">Empleado</th>
+                    <th className="px-3 py-3 text-left">Periodo</th>
+                    <th className="px-3 py-3 text-right">Total</th>
+                    <th className="px-3 py-3 text-left">Timbrado</th>
+                    <th className="px-3 py-3 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-white/[0.04]">
                   {data.map((c) => {
                     const col = estatusColor(c.estatus);
+                    const StIcon = c.estatus === "TIMBRADO" ? CheckCircle : c.estatus === "CANCELADO" ? XCircle : c.estatus === "ERROR" ? AlertTriangle : Clock;
                     return (
-                      <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-white/[0.025]">
-                        <td className="px-3 py-2">
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: col + "22", color: col }}>
-                            {c.estatus}
+                      <tr key={c.id} className="hover:bg-emerald-500/[0.04] dark:hover:bg-emerald-500/[0.06] transition-colors">
+                        <td className="px-3 py-2.5">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full" style={{ background: col + "1f", color: col }}>
+                            <StIcon size={11} /> {c.estatus}
                           </span>
                         </td>
                         <td className="px-3 py-2 font-mono text-slate-600 dark:text-slate-300">{(c.uuid || "").slice(0, 8)}...</td>

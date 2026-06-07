@@ -131,40 +131,55 @@ export default function FacturacionPage() {
 
   const ESTADOS = ["TODAS", "TIMBRADA", "BORRADOR", "CANCELADA", "ERROR"];
 
+  const heroGrad = isDark
+    ? "linear-gradient(120deg,#0EA5E9 0%,#14B8A6 50%,#10B981 100%)"
+    : "linear-gradient(120deg,#1A73E8 0%,#2b8fd6 55%,#34A853 100%)";
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
-            <FileText className="w-6 h-6" />
+      {/* Hero header */}
+      <div className="relative overflow-hidden rounded-3xl p-6 shadow-xl" style={{ background: heroGrad }}>
+        <div className="absolute -top-16 -right-10 w-64 h-64 rounded-full bg-white/10 blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-20 left-1/3 w-72 h-72 rounded-full bg-black/10 blur-3xl pointer-events-none" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm ring-1 ring-white/30 flex items-center justify-center shadow-lg">
+              <FileText className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Facturación CFDI 4.0</h1>
+              <p className="text-sm text-white/80">Emite, timbra, descarga XML/PDF y cancela tus CFDI ante el SAT.</p>
+            </div>
           </div>
-          <div>
-            <h1 className={`text-2xl font-bold ${t.textPrimary}`}>Facturacion CFDI 4.0</h1>
-            <p className={`text-sm ${t.textSecondary}`}>Emite, timbra, descarga XML/PDF y cancela tus CFDI.</p>
-          </div>
+          <Link href="/facturacion/nueva">
+            <button className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-white text-slate-900 font-bold text-sm shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all">
+              <Plus className="w-4 h-4" /> Nueva factura
+            </button>
+          </Link>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={load}><RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refrescar</Button>
-          <Link href="/facturacion/clientes"><Button variant="secondary"><Building2 className="w-4 h-4" /> Clientes</Button></Link>
-          <Link href="/facturacion/pagos"><Button variant="secondary"><Wallet className="w-4 h-4" /> Complementos</Button></Link>
-          <Link href="/facturacion/notas-credito"><Button variant="secondary"><Receipt className="w-4 h-4" /> Notas de crédito</Button></Link>
-          <Link href="/facturacion/reportes"><Button variant="secondary"><BarChart3 className="w-4 h-4" /> Reportes</Button></Link>
-          <Link href="/facturacion/nueva"><Button><Plus className="w-4 h-4" /> Nueva factura</Button></Link>
+        {/* Sub-nav */}
+        <div className="relative mt-5 flex flex-wrap gap-2">
+          <HeroLink onClick={load} icon={<RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />} label="Refrescar" />
+          <HeroLink href="/facturacion/clientes" icon={<Building2 className="w-4 h-4" />} label="Clientes" />
+          <HeroLink href="/facturacion/pagos" icon={<Wallet className="w-4 h-4" />} label="Complementos" />
+          <HeroLink href="/facturacion/notas-credito" icon={<Receipt className="w-4 h-4" />} label="Notas de crédito" />
+          <HeroLink href="/facturacion/reportes" icon={<BarChart3 className="w-4 h-4" />} label="Reportes" />
         </div>
       </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard t={t} label="Total facturas" value={String(stats.tot)} color="#6366F1" icon={<FileText className="w-5 h-5" />} />
-        <KpiCard t={t} label="Timbradas" value={String(stats.timbradas)} color="#10B981" icon={<CheckCircle2 className="w-5 h-5" />} />
-        <KpiCard t={t} label="Borradores" value={String(stats.borradores)} color="#F59E0B" icon={<Clock className="w-5 h-5" />} />
-        <KpiCard t={t} label="Monto timbrado" value={money(stats.monto)} color="#14B8A6" icon={<BarChart3 className="w-5 h-5" />} />
+        <KpiCard t={t} isDark={isDark} label="Total facturas" value={String(stats.tot)} color="#6366F1" icon={<FileText className="w-5 h-5" />} />
+        <KpiCard t={t} isDark={isDark} label="Timbradas" value={String(stats.timbradas)} color="#10B981" icon={<CheckCircle2 className="w-5 h-5" />} />
+        <KpiCard t={t} isDark={isDark} label="Borradores" value={String(stats.borradores)} color="#F59E0B" icon={<Clock className="w-5 h-5" />} />
+        <KpiCard t={t} isDark={isDark} label="Monto timbrado" value={money(stats.monto)} color="#14B8A6" icon={<Wallet className="w-5 h-5" />} highlight />
       </div>
 
       {/* Toolbar: búsqueda + filtros */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${t.divider} flex-1 min-w-[220px]`}>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border ${t.divider} ${
+          isDark ? "bg-[#0F172A]/70" : "bg-white"
+        } flex-1 min-w-[240px] shadow-sm focus-within:ring-2 focus-within:ring-[#14B8A6]/40 transition-all`}>
           <Search className={`w-4 h-4 ${t.textTertiary}`} />
           <input
             value={q} onChange={(e) => setQ(e.target.value)}
@@ -172,14 +187,15 @@ export default function FacturacionPage() {
             className={`bg-transparent outline-none text-sm w-full ${t.textPrimary}`}
           />
         </div>
-        <div className="flex gap-1">
+        <div className={`flex gap-1 p-1 rounded-xl border ${t.divider} ${isDark ? "bg-[#0F172A]/70" : "bg-white"} shadow-sm`}>
           {ESTADOS.map((e) => (
             <button key={e} onClick={() => setFiltro(e)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 filtro === e
-                  ? "bg-emerald-500 text-white shadow"
+                  ? "text-white shadow"
                   : `${t.textSecondary} ${isDark ? "hover:bg-white/5" : "hover:bg-black/5"}`
-              }`}>
+              }`}
+              style={filtro === e ? { background: isDark ? "linear-gradient(135deg,#14B8A6,#10B981)" : "linear-gradient(135deg,#1A73E8,#34A853)" } : undefined}>
               {e === "TODAS" ? "Todas" : e.charAt(0) + e.slice(1).toLowerCase()}
             </button>
           ))}
@@ -190,32 +206,34 @@ export default function FacturacionPage() {
       <Card>
         <div className="overflow-x-auto -mx-6">
           <table className="w-full text-sm">
-            <thead className={`text-left text-[11px] uppercase tracking-wide ${t.textTertiary} border-b ${t.divider}`}>
+            <thead className={`text-left text-[11px] font-bold uppercase tracking-wider ${t.textTertiary} ${isDark ? "bg-white/[0.02]" : "bg-slate-50"} border-b ${t.divider}`}>
               <tr>
-                <th className="px-6 py-3">Folio</th>
-                <th className="px-6 py-3">Fecha</th>
-                <th className="px-6 py-3">Cliente</th>
-                <th className="px-6 py-3 text-right">Total</th>
-                <th className="px-6 py-3">Estado</th>
-                <th className="px-6 py-3 text-right">Acciones</th>
+                <th className="px-6 py-3.5">Folio</th>
+                <th className="px-6 py-3.5">Fecha</th>
+                <th className="px-6 py-3.5">Cliente</th>
+                <th className="px-6 py-3.5 text-right">Total</th>
+                <th className="px-6 py-3.5">Estado</th>
+                <th className="px-6 py-3.5 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filtradas.map((f) => (
-                <tr key={f.id} className={`border-b ${t.divider} ${isDark ? "hover:bg-white/[0.02]" : "hover:bg-black/[0.015]"} transition-colors`}>
-                  <td className={`px-6 py-3 font-mono font-bold ${t.textPrimary}`}>{f.serie_letra}-{f.folio}</td>
-                  <td className={`px-6 py-3 ${t.textSecondary}`}>{new Date(f.fecha_emision).toLocaleDateString("es-MX")}</td>
-                  <td className="px-6 py-3">
+                <tr key={f.id} className={`border-b ${t.divider} ${isDark ? "hover:bg-white/[0.03]" : "hover:bg-[#1A73E8]/[0.03]"} transition-colors`}>
+                  <td className="px-6 py-3.5">
+                    <span className={`inline-flex items-center font-mono font-bold px-2 py-0.5 rounded-md text-xs ${
+                      isDark ? "bg-white/[0.04] text-slate-100" : "bg-slate-100 text-slate-800"
+                    }`}>{f.serie_letra}-{f.folio}</span>
+                  </td>
+                  <td className={`px-6 py-3.5 ${t.textSecondary}`}>{new Date(f.fecha_emision).toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                  <td className="px-6 py-3.5">
                     <div className={`${t.textPrimary} font-semibold`}>{f.cliente_data?.razon_social}</div>
                     <div className={`text-[10px] font-mono ${t.textTertiary}`}>{f.cliente_data?.rfc}</div>
                   </td>
-                  <td className={`px-6 py-3 text-right font-mono font-bold ${t.textPrimary}`}>{money(f.total)}</td>
-                  <td className="px-6 py-3">
-                    <span className="inline-flex items-center gap-1.5">
-                      <Badge text={f.estado} type={estadoColor(f.estado) as any} />
-                    </span>
+                  <td className={`px-6 py-3.5 text-right font-mono font-bold ${t.textPrimary}`}>{money(f.total)}</td>
+                  <td className="px-6 py-3.5">
+                    <EstadoPill estado={f.estado} />
                   </td>
-                  <td className="px-6 py-3">
+                  <td className="px-6 py-3.5">
                     <div className="flex items-center justify-end gap-1.5">
                       {f.estado === "BORRADOR" && (
                         <Button size="sm" onClick={() => timbrar(f.id)} disabled={busy === f.id}>
@@ -271,7 +289,7 @@ export default function FacturacionPage() {
           tipoLabel={TIPO_LABEL[detalle.tipo_comprobante || "I"] || detalle.tipo_comprobante || "—"}
           onClose={() => setDetalle(null)}
           onTimbrar={() => { timbrar(detalle.id); setDetalle(null); }}
-          onDescargar={(accion) => descargar(detalle, accion)}
+          onDescargar={(accion: "xml" | "pdf") => descargar(detalle, accion)}
           estadoColor={estadoColor}
           EstadoIcon={EstadoIcon}
           busy={busy === detalle.id}
@@ -281,15 +299,47 @@ export default function FacturacionPage() {
   );
 }
 
-function KpiCard({ t, label, value, color, icon }: any) {
+const ESTADO_STYLE: Record<string, { c: string; label: string }> = {
+  TIMBRADA: { c: "#10B981", label: "Timbrada" },
+  BORRADOR: { c: "#F59E0B", label: "Borrador" },
+  CANCELADA: { c: "#F43F5E", label: "Cancelada" },
+  ERROR: { c: "#EF4444", label: "Error" },
+};
+function EstadoPill({ estado }: { estado: string }) {
+  const s = ESTADO_STYLE[estado] || { c: "#94A3B8", label: estado };
+  const Icon = estado === "TIMBRADA" ? CheckCircle2
+    : estado === "CANCELADA" ? XCircle
+    : estado === "ERROR" ? AlertTriangle : Clock;
   return (
-    <div className={`rounded-2xl border p-4 ${t.divider} ${t.surface || ""}`}>
-      <div className="flex items-center justify-between">
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold"
+      style={{ background: s.c + "1f", color: s.c }}>
+      <Icon className="w-3.5 h-3.5" /> {s.label}
+    </span>
+  );
+}
+
+function HeroLink({ href, onClick, icon, label }: any) {
+  const cls = "inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 ring-1 ring-white/20 text-white text-sm font-semibold backdrop-blur-sm transition-all";
+  if (href) return <Link href={href} className={cls}>{icon} {label}</Link>;
+  return <button onClick={onClick} className={cls}>{icon} {label}</button>;
+}
+
+function KpiCard({ t, isDark, label, value, color, icon, highlight }: any) {
+  return (
+    <div className={`group relative overflow-hidden rounded-2xl border p-4 transition-all hover:-translate-y-0.5 ${t.divider} ${
+      isDark ? "bg-[#0F172A]/70" : "bg-white"
+    } ${highlight ? "shadow-lg" : "shadow-sm hover:shadow-md"}`}>
+      {/* barra de acento superior */}
+      <div className="absolute inset-x-0 top-0 h-1" style={{ background: color }} />
+      {/* glow */}
+      <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full blur-2xl opacity-20 transition-opacity group-hover:opacity-30"
+        style={{ background: color }} />
+      <div className="relative flex items-center justify-between">
         <span className={`text-[11px] font-bold uppercase tracking-wider ${t.textTertiary}`}>{label}</span>
-        <span className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: color + "1f", color }}>{icon}</span>
+        <span className="w-10 h-10 rounded-xl flex items-center justify-center shadow-sm"
+          style={{ background: color + (isDark ? "26" : "1f"), color }}>{icon}</span>
       </div>
-      <div className={`text-2xl font-black mt-2 ${t.textPrimary}`}>{value}</div>
+      <div className={`relative text-2xl md:text-[1.7rem] font-black mt-2 leading-none ${t.textPrimary}`}>{value}</div>
     </div>
   );
 }

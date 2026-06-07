@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowLeft, Calculator, CheckCircle, Download, FileText, Loader2, Plus,
+  ArrowLeft, Calculator, CheckCircle, Clock, Download, FileText, Loader2, Plus,
   RefreshCw, Send, Trash2, Users, XCircle, AlertTriangle,
 } from "lucide-react";
 
@@ -109,6 +109,48 @@ export default function PeriodoDetallePage({ params }: { params: Promise<{ id: s
     finally { setBusy(null); }
   };
 
+  const timbrarPeriodo = async () => {
+    const pendientes = recibos.filter((r) => (r.estatus_cfdi || "BORRADOR") !== "TIMBRADO");
+    if (pendientes.length === 0) {
+      setMsg({ kind: "err", txt: "No hay recibos pendientes de timbrar." });
+      return;
+    }
+    if (!confirm(`Se timbrarán ${pendientes.length} recibo(s) ante el SAT. ¿Continuar?`)) return;
+    setBusy("timbrar-periodo");
+    setMsg(null);
+    let ok = 0;
+    const errores: string[] = [];
+    try {
+      // Asegura/crea los CFDI borrador de todos los pendientes (genera el objeto)
+      await Promise.all(
+        pendientes.map((r) =>
+          fetch(api.xmlPreviewRecibo(r.id), { credentials: "include", headers: tokenHeader() }).catch(() => null),
+        ),
+      );
+      const cfdis = await api.getCFDINomina({ "nomina_empleado__periodo": String(id), page_size: "500" });
+      const lista = cfdis.results || [];
+      for (const r of pendientes) {
+        const cfdi = lista.find((c: any) => c.nomina_empleado === r.id);
+        if (!cfdi) { errores.push(`${r.empleado_nombre}: sin CFDI borrador`); continue; }
+        if (cfdi.estatus === "TIMBRADO") { ok++; continue; }
+        try {
+          const t = await api.timbrarCFDI(cfdi.id);
+          if (t.uuid) ok++;
+          else errores.push(`${r.empleado_nombre}: ${t.detail || "error desconocido"}`);
+        } catch (e) {
+          errores.push(`${r.empleado_nombre}: ${(e as Error).message}`);
+        }
+      }
+      const resumen = `Timbrados ${ok}/${pendientes.length} recibo(s).` + (errores.length ? ` Errores: ${errores.slice(0, 3).join(" · ")}${errores.length > 3 ? "…" : ""}` : "");
+      setMsg({ kind: errores.length ? "err" : "ok", txt: resumen });
+      await load();
+    } catch (e) {
+      setMsg({ kind: "err", txt: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (loading || !periodo) {
     return (
       <div className="min-h-screen flex items-center justify-center text-slate-400 dark:text-slate-500">
@@ -128,31 +170,30 @@ export default function PeriodoDetallePage({ params }: { params: Promise<{ id: s
         </Link>
 
         {/* Hero */}
-        <div className="rounded-2xl border border-emerald-200/60 dark:border-emerald-500/15 bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-slate-900/40 p-5 sm:p-6 dark:backdrop-blur-xl">
-          <div className="flex items-start justify-between flex-wrap gap-4">
-            <div>
-              <h1 className="text-2xl font-black text-slate-800 dark:text-white flex items-center gap-2">
-                <Calculator className="text-emerald-500" /> {periodo.nombre}
-              </h1>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                {periodo.fecha_inicio} → {periodo.fecha_fin} · pago {periodo.fecha_pago} · {periodo.num_dias_pagados} dias
-              </p>
-              <div className="flex flex-wrap items-center gap-2 mt-2">
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: estatusColor(periodo.estatus) + "22", color: estatusColor(periodo.estatus) }}>
-                  {periodo.estatus}
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-white/[0.06] text-slate-600 dark:text-slate-300">
-                  {periodo.tipo_nomina === "O" ? "Ordinaria" : "Extraordinaria"}
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-white/[0.06] text-slate-600 dark:text-slate-300">
-                  Periodicidad {periodo.periodicidad_pago}
-                </span>
+        <div className="relative overflow-hidden rounded-3xl p-6 shadow-xl" style={{ background: "linear-gradient(120deg,#10B981 0%,#14B8A6 50%,#0EA5E9 100%)" }}>
+          <div className="absolute -top-16 -right-10 w-64 h-64 rounded-full bg-white/10 blur-2xl pointer-events-none" />
+          <div className="absolute -bottom-20 left-1/3 w-72 h-72 rounded-full bg-black/10 blur-3xl pointer-events-none" />
+          <div className="relative flex items-start justify-between flex-wrap gap-4">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm ring-1 ring-white/30 flex items-center justify-center shadow-lg shrink-0">
+                <Calculator className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">{periodo.nombre}</h1>
+                <p className="text-sm text-white/80 mt-1">
+                  {periodo.fecha_inicio} → {periodo.fecha_fin} · pago {periodo.fecha_pago} · {periodo.num_dias_pagados} dias
+                </p>
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  <HeroBadge>{periodo.estatus}</HeroBadge>
+                  <HeroBadge>{periodo.tipo_nomina === "O" ? "Ordinaria" : "Extraordinaria"}</HeroBadge>
+                  <HeroBadge>Periodicidad {periodo.periodicidad_pago}</HeroBadge>
+                </div>
               </div>
             </div>
             <div className="text-right">
-              <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Total neto</p>
-              <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums">{fmtMoney(totalPeriodo)}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{timbrados} / {recibos.length} timbrados</p>
+              <p className="text-[10px] font-extrabold uppercase tracking-widest text-white/70">Total neto</p>
+              <p className="text-3xl md:text-4xl font-black text-white tabular-nums leading-none mt-1">{fmtMoney(totalPeriodo)}</p>
+              <p className="text-xs text-white/80 mt-1.5">{timbrados} / {recibos.length} timbrados</p>
             </div>
           </div>
         </div>
@@ -172,26 +213,33 @@ export default function PeriodoDetallePage({ params }: { params: Promise<{ id: s
         {/* Acciones */}
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={cargarEmpleados} disabled={busy === "cargar"}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 dark:text-slate-300 hover:scale-[1.02] transition-transform disabled:opacity-50">
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold rounded-xl bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all disabled:opacity-50">
             {busy === "cargar" ? <RefreshCw size={13} className="animate-spin" /> : <Users size={13} />}
             Cargar empleados activos
           </button>
           <button onClick={calcular} disabled={busy === "calcular" || recibos.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg text-white shadow-sm disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold rounded-xl text-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
             style={{ background: "linear-gradient(135deg,#3B82F6,#6366F1)" }}>
             {busy === "calcular" ? <RefreshCw size={13} className="animate-spin" /> : <Calculator size={13} />}
             Calcular (ISR + IMSS + Subsidio)
           </button>
-          <button onClick={load} className="px-3 py-2 text-xs font-bold rounded-lg bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 dark:text-slate-300">
+          <button onClick={timbrarPeriodo} disabled={busy === "timbrar-periodo" || recibos.length === 0}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold rounded-xl text-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
+            style={{ background: "linear-gradient(135deg,#10B981,#14B8A6)" }}>
+            {busy === "timbrar-periodo" ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} />}
+            Timbrar periodo ({recibos.filter((r) => (r.estatus_cfdi || "BORRADOR") !== "TIMBRADO").length})
+          </button>
+          <button onClick={load} title="Refrescar"
+            className="px-3 py-2.5 text-xs font-bold rounded-xl bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
 
         {/* Lista de recibos */}
-        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] overflow-hidden">
-          <div className="px-4 sm:px-6 py-3 border-b border-slate-100 dark:border-white/[0.04] flex items-center justify-between">
-            <h2 className="text-sm font-black uppercase tracking-tight text-slate-800 dark:text-white">
-              Recibos ({recibos.length})
+        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] shadow-sm overflow-hidden">
+          <div className="px-4 sm:px-6 py-3.5 border-b border-slate-100 dark:border-white/[0.04] bg-slate-50/60 dark:bg-white/[0.02] flex items-center justify-between">
+            <h2 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-2">
+              <Users size={15} className="text-emerald-500" /> Recibos ({recibos.length})
             </h2>
           </div>
           {recibos.length === 0 ? (
@@ -205,12 +253,11 @@ export default function PeriodoDetallePage({ params }: { params: Promise<{ id: s
               {recibos.map((r) => {
                 const open = expanded.has(r.id);
                 const estado = r.estatus_cfdi || "BORRADOR";
-                const c = estatusCFDIColor(estado);
                 return (
                   <div key={r.id}>
                     <button onClick={() => toggle(r.id)}
-                      className="w-full text-left px-4 sm:px-6 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-white/[0.025]">
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center font-black text-white shrink-0 text-[12px]"
+                      className="w-full text-left px-4 sm:px-6 py-3 flex items-center gap-3 hover:bg-emerald-500/[0.04] dark:hover:bg-emerald-500/[0.06] transition-colors">
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center font-black text-white shrink-0 text-[12px] shadow-sm"
                         style={{ background: "linear-gradient(135deg,#10B981,#14B8A6)" }}>
                         {(r.empleado_nombre?.[0] || "?").toUpperCase()}
                       </div>
@@ -219,7 +266,7 @@ export default function PeriodoDetallePage({ params }: { params: Promise<{ id: s
                           <p className="font-bold text-sm text-slate-800 dark:text-white">{r.empleado_nombre}</p>
                           <span className="text-[10px] font-mono text-slate-400">#{r.empleado_numero}</span>
                           {r.empleado_rfc && <span className="text-[10px] font-mono text-slate-400">{r.empleado_rfc}</span>}
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: c + "22", color: c }}>{estado}</span>
+                          <CfdiPill estado={estado} />
                         </div>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                           {r.dias_pagados} dias · SD {fmtMoney(+r.salario_diario)} · neto <span className="font-bold text-emerald-600 dark:text-emerald-400">{fmtMoney(+r.total_neto)}</span>
@@ -245,22 +292,22 @@ export default function PeriodoDetallePage({ params }: { params: Promise<{ id: s
                             <p className="p-4 text-center text-xs text-slate-400">Sin conceptos · usa "Calcular" arriba.</p>
                           ) : (
                             <table className="w-full text-xs">
-                              <thead className="bg-slate-50 dark:bg-white/[0.02]">
-                                <tr className="text-[9px] uppercase tracking-widest text-slate-400 font-bold">
-                                  <th className="px-3 py-2 text-left">Tipo</th>
-                                  <th className="px-3 py-2 text-left">Clave SAT</th>
-                                  <th className="px-3 py-2 text-left">Concepto</th>
-                                  <th className="px-3 py-2 text-right">Gravado</th>
-                                  <th className="px-3 py-2 text-right">Exento</th>
-                                  <th className="px-3 py-2 text-right">Importe</th>
+                              <thead className="bg-slate-50 dark:bg-white/[0.02] border-b border-slate-100 dark:border-white/[0.04]">
+                                <tr className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                                  <th className="px-3 py-2.5 text-left">Tipo</th>
+                                  <th className="px-3 py-2.5 text-left">Clave SAT</th>
+                                  <th className="px-3 py-2.5 text-left">Concepto</th>
+                                  <th className="px-3 py-2.5 text-right">Gravado</th>
+                                  <th className="px-3 py-2.5 text-right">Exento</th>
+                                  <th className="px-3 py-2.5 text-right">Importe</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100 dark:divide-white/[0.04]">
                                 {r.conceptos.map((c) => (
-                                  <tr key={c.id}>
+                                  <tr key={c.id} className="hover:bg-emerald-500/[0.03] dark:hover:bg-emerald-500/[0.05] transition-colors">
                                     <td className="px-3 py-2">
-                                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{
-                                        background: tipoColor(c.tipo) + "22",
+                                      <span className="inline-flex items-center text-[9px] font-bold px-2 py-0.5 rounded-full" style={{
+                                        background: tipoColor(c.tipo) + "1f",
                                         color: tipoColor(c.tipo),
                                       }}>
                                         {c.tipo === "P" ? "PER" : c.tipo === "D" ? "DED" : "OTR"}
@@ -282,18 +329,18 @@ export default function PeriodoDetallePage({ params }: { params: Promise<{ id: s
                         <div className="flex flex-wrap gap-2 mt-3">
                           {estado !== "TIMBRADO" && (
                             <button onClick={() => timbrar(r)} disabled={busy === `tim-${r.id}`}
-                              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg text-white shadow-sm disabled:opacity-50"
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl text-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50"
                               style={{ background: "linear-gradient(135deg,#10B981,#14B8A6)" }}>
                               {busy === `tim-${r.id}` ? <RefreshCw size={12} className="animate-spin" /> : <Send size={12} />}
                               Timbrar CFDI
                             </button>
                           )}
                           <a href={api.xmlPreviewRecibo(r.id)} target="_blank" rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 dark:text-slate-300">
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
                             <FileText size={12} /> Ver XML preview
                           </a>
                           {r.cfdi_uuid && (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-mono rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-mono rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
                               UUID: {r.cfdi_uuid.slice(0, 8)}...
                             </span>
                           )}
@@ -316,10 +363,31 @@ function tokenHeader(): HeadersInit {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+function HeroBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-white/20 text-white ring-1 ring-white/30 backdrop-blur-sm">
+      {children}
+    </span>
+  );
+}
+
+function CfdiPill({ estado }: { estado: string }) {
+  const c = estatusCFDIColor(estado);
+  const Icon = estado === "TIMBRADO" ? CheckCircle
+    : estado === "CANCELADO" ? XCircle
+    : estado === "ERROR" ? AlertTriangle : Clock;
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: c + "1f", color: c }}>
+      <Icon size={11} /> {estado}
+    </span>
+  );
+}
+
 function Stat({ label, v, c }: { label: string; v: number; c: string }) {
   return (
-    <div className="rounded-xl border p-3 bg-white dark:bg-white/[0.02] border-slate-200/70 dark:border-white/[0.06]">
-      <p className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">{label}</p>
+    <div className="relative overflow-hidden rounded-xl border p-3 bg-white dark:bg-white/[0.02] border-slate-200/70 dark:border-white/[0.06] shadow-sm">
+      <div className="absolute inset-x-0 top-0 h-1" style={{ background: c }} />
+      <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">{label}</p>
       <p className="text-base font-black tabular-nums mt-0.5" style={{ color: c }}>{fmtMoney(v)}</p>
     </div>
   );

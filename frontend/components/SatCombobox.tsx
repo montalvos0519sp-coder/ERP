@@ -6,6 +6,28 @@ import { api } from "@/lib/api";
 
 interface Hit { id: string; text: string; }
 
+// Mapa de tipo "amigable" → slug real del endpoint /api/catalogos-sat/{slug}/.
+const SLUG: Record<string, string> = {
+  ClaveProdServ: "clave-prod-serv",
+  ClaveProdServCP: "clave-prod-serv-cp",
+  ClaveUnidad: "clave-unidad",
+  Estado: "estados",
+  Municipio: "municipios",
+  CodigoPostal: "codigos-postales",
+  Colonia: "colonias",
+  TipoFigura: "tipo-figura",
+  TipoPermiso: "tipo-permiso",
+  ConfigVehicular: "config-vehicular",
+  SubTipoRem: "subtipo-rem",
+};
+
+// Normaliza un registro del catálogo SAT a {id, text:"CLAVE - Descripción"}.
+function normalizarHit(r: any): Hit {
+  const id = r.clave ?? r.codigo_postal ?? r.id ?? "";
+  const desc = r.descripcion ?? r.nombre ?? r.simbolo ?? r.estado ?? "";
+  return { id: String(id), text: desc ? `${id} - ${desc}` : String(id) };
+}
+
 interface Props {
   tipo?: string;              // 'ClaveProdServ' | 'ClaveUnidad' | etc.
   value: string;              // clave seleccionada
@@ -63,9 +85,11 @@ export default function SatCombobox({
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const r = await api.buscarCatalogoSAT(q, tipo) as { results: Hit[] };
-        setResults(r.results || []);
-        setHi(r.results.length > 0 ? 0 : -1);
+        const slug = SLUG[tipo] || tipo;
+        const r = await api.buscarCatalogoSAT(slug, q) as { results: any[] };
+        const hits = (r.results || []).map(normalizarHit);
+        setResults(hits);
+        setHi(hits.length > 0 ? 0 : -1);
       } catch {
         setResults([]);
       } finally {

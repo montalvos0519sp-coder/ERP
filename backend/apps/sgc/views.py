@@ -12,26 +12,32 @@ from rest_framework.response import Response
 from apps.core.models import Empresa
 
 from .models import (
-    AccionCAPA, AcuerdoRevision, ActividadSGC, Auditoria, Capacitacion, ComentarioSGC,
+    AccionCAPA, AcuerdoRevision, ActividadSGC, Auditoria, Capacitacion, ParticipanteCapacitacion, ComentarioSGC,
     CompetenciaPerfil, ElementoContexto, Encuesta, Equipo, EvaluacionCompetencia, EvaluacionDetalle, EvaluacionProveedor,
     EvaluacionRequisito, EvidenciaSGC, Hallazgo, IndicadorKPI, MedicionKPI, NoConformidad,
     NotificacionCalidad, Norma, ObjetivoCalidad, ParteInteresada, PerfilPuesto, PoliticaCalidad,
     Proceso, Queja, RequisitoISO, RespuestaEncuesta, RevisionDireccion, Riesgo,
-    SubtareaImplementacion, TareaImplementacion, TareaObjetivo,
+    SalidaNoConforme, SubtareaImplementacion, TareaImplementacion, TareaObjetivo,
+    PlantillaDocumento, HitoCertificacion, ProgramaAuditoria, PlantillaChecklist,
+    ItemChecklist, RegistroCalidad, GestionCambio, ComunicacionSGC, ConocimientoOrganizacional,
 )
 from .serializers import (
     AccionCAPASerializer, AcuerdoRevisionSerializer, ActividadSGCSerializer, AuditoriaSerializer,
-    CapacitacionSerializer,
+    CapacitacionSerializer, ParticipanteCapacitacionSerializer,
     ComentarioSGCSerializer, ElementoContextoSerializer, EquipoSerializer,
     EvaluacionCompetenciaSerializer, EvaluacionProveedorSerializer, EvaluacionRequisitoSerializer,
     EvidenciaSGCSerializer, HallazgoSerializer, IndicadorKPISerializer, MedicionKPISerializer,
     MiembroSerializer, NoConformidadSerializer, NotificacionCalidadSerializer, NormaSerializer,
     ObjetivoCalidadSerializer, ParteInteresadaSerializer, PerfilPuestoSerializer,
     PoliticaCalidadSerializer, ProcesoSerializer, QuejaSerializer, RequisitoISOSerializer,
-    RevisionDireccionSerializer, RiesgoSerializer, SubtareaImplementacionSerializer,
+    RevisionDireccionSerializer, RiesgoSerializer, SalidaNoConformeSerializer,
+    SubtareaImplementacionSerializer,
     TareaImplementacionSerializer, TareaObjetivoSerializer,
     EncuestaSerializer, EncuestaPublicaSerializer, RespuestaEncuestaSerializer,
     CompetenciaPerfilSerializer, EvaluacionDetalleSerializer,
+    PlantillaDocumentoSerializer, HitoCertificacionSerializer, ProgramaAuditoriaSerializer,
+    PlantillaChecklistSerializer, ItemChecklistSerializer, RegistroCalidadSerializer,
+    GestionCambioSerializer, ComunicacionSGCSerializer, ConocimientoOrganizacionalSerializer,
 )
 from .servicios import (
     ct_para, extraer_menciones, marcar_leidas, miembros_empresa, nombre_usuario,
@@ -125,6 +131,25 @@ class EvaluacionRequisitoViewSet(_Scoped):
     serializer_class = EvaluacionRequisitoSerializer
     filterset_fields = ["empresa", "requisito", "requisito__norma", "cumple"]
 
+    def create(self, request, *args, **kwargs):
+        """Upsert: si ya existe la evaluación de (empresa, requisito) la actualiza
+        en vez de fallar por la restricción única empresa+requisito. Así el
+        diagnóstico nunca se rompe aunque el cliente envíe POST en lugar de PATCH."""
+        ids = list(_empresas(request.user))
+        try:
+            emp = int(request.data.get("empresa"))
+            req = int(request.data.get("requisito"))
+        except (TypeError, ValueError):
+            emp = req = None
+        if emp and req and emp in ids:
+            existente = EvaluacionRequisito.objects.filter(empresa_id=emp, requisito_id=req).first()
+            if existente:
+                ser = self.get_serializer(existente, data=request.data, partial=True)
+                ser.is_valid(raise_exception=True)
+                ser.save()
+                return Response(ser.data)
+        return super().create(request, *args, **kwargs)
+
     @action(detail=False, methods=["post"])
     def generar_capa(self, request):
         """Crea no conformidades automáticamente desde las brechas (NO/PARCIAL)."""
@@ -208,6 +233,85 @@ class AuditoriaViewSet(_Colaborativo):
     serializer_class = AuditoriaSerializer
     filterset_fields = ["empresa", "tipo", "estado", "auditor_lider_user"]
 
+    @action(detail=True, methods=["get"])
+    def checklist(self, request, pk=None):
+        """Devuelve el checklist de ejecución de la auditoría. Si está vacío, lo
+        siembra con los requisitos de la norma (o ISO 9001 por defecto)."""
+        from .models import RespuestaChecklistAuditoria
+        aud = self.get_object()
+        existentes = RespuestaChecklistAuditoria.objects.filter(auditoria=aud)
+        if not existentes.exists():
+            norma = aud.norma or Norma.objects.filter(codigo__icontains="9001").first()
+            reqs = RequisitoISO.objects.filter(norma=norma) if norma else RequisitoISO.objects.none()
+            for r in reqs:
+                RespuestaChecklistAuditoria.objects.create(
+                    auditoria=aud, requisito=r, clausula=r.clausula,
+                    pregunta=r.titulo, resultado="PENDIENTE")
+            existentes = RespuestaChecklistAuditoria.objects.filter(auditoria=aud)
+        items = [{
+            "id": x.id, "clausula": x.clausula, "pregunta": x.pregunta,
+            "resultado": x.resultado, "nota": x.nota,
+        } for x in existentes.order_by("id")]
+        # Progreso y conteo.
+        total = len(items)
+        evaluados = sum(1 for x in items if x["resultado"] != "PENDIENTE")
+        return Response({
+            "auditoria": aud.titulo, "estado": aud.estado, "total": total,
+            "evaluados": evaluados,
+            "progreso": round(evaluados / total * 100, 1) if total else 0,
+            "conforme": sum(1 for x in items if x["resultado"] == "CONFORME"),
+            "no_conforme": sum(1 for x in items if x["resultado"] == "NO_CONFORME"),
+            "observacion": sum(1 for x in items if x["resultado"] == "OBSERVACION"),
+            "items": items,
+        })
+
+    @action(detail=True, methods=["post"], url_path="guardar-checklist")
+    def guardar_checklist(self, request, pk=None):
+        """Guarda la respuesta de un punto del checklist (resultado + nota)."""
+        from .models import RespuestaChecklistAuditoria
+        aud = self.get_object()
+        item_id = request.data.get("id")
+        try:
+            item = RespuestaChecklistAuditoria.objects.get(id=item_id, auditoria=aud)
+        except RespuestaChecklistAuditoria.DoesNotExist:
+            return Response({"detail": "Punto no encontrado."}, status=404)
+        if "resultado" in request.data:
+            item.resultado = request.data["resultado"]
+        if "nota" in request.data:
+            item.nota = request.data["nota"]
+        item.save()
+        if aud.estado == "PROGRAMADA":
+            aud.estado = "EN_CURSO"
+            aud.save(update_fields=["estado"])
+        return Response({"ok": True})
+
+    @action(detail=True, methods=["post"], url_path="cerrar-checklist")
+    def cerrar_checklist(self, request, pk=None):
+        """Cierra la auditoría y genera hallazgos automáticamente desde los
+        puntos NO CONFORME y OBSERVACIÓN del checklist."""
+        from .models import RespuestaChecklistAuditoria
+        aud = self.get_object()
+        creados = 0
+        for x in RespuestaChecklistAuditoria.objects.filter(
+                auditoria=aud, resultado__in=["NO_CONFORME", "OBSERVACION"]):
+            # Evita duplicar hallazgos del mismo requisito.
+            if Hallazgo.objects.filter(auditoria=aud, requisito=x.requisito).exists():
+                continue
+            tipo = "NC_MENOR" if x.resultado == "NO_CONFORME" else "OBSERVACION"
+            Hallazgo.objects.create(
+                auditoria=aud, requisito=x.requisito, tipo=tipo,
+                descripcion=f"[{x.clausula}] {x.pregunta}",
+                evidencia=x.nota)
+            creados += 1
+        aud.estado = "CERRADA"
+        from datetime import date as _d
+        if not aud.fecha_realizada:
+            aud.fecha_realizada = _d.today()
+        aud.save(update_fields=["estado", "fecha_realizada"])
+        registrar_actividad(aud, request.user, "CERRO",
+                            f"cerró la auditoría y generó {creados} hallazgo(s)")
+        return Response({"hallazgos_creados": creados, "estado": aud.estado})
+
 
 class HallazgoViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -238,16 +342,305 @@ class RiesgoViewSet(_Colaborativo):
     filterset_fields = ["empresa", "estado", "es_oportunidad", "responsable_user"]
 
 
-class IndicadorKPIViewSet(_Scoped):
-    queryset = IndicadorKPI.objects.all()
+class IndicadorKPIViewSet(_Colaborativo):
+    queryset = IndicadorKPI.objects.select_related("responsable_user")
     serializer_class = IndicadorKPISerializer
-    filterset_fields = ["empresa", "proceso"]
+    filterset_fields = ["empresa", "proceso", "responsable_user"]
+
+    @action(detail=True, methods=["get", "post"])
+    def mediciones(self, request, pk=None):
+        """GET: historial de mediciones del KPI con su tendencia.
+        POST: registra una nueva medición (valor + fecha) y actualiza el valor actual."""
+        kpi = self.get_object()
+        if request.method == "POST":
+            from datetime import date as _date
+            valor = request.data.get("valor")
+            if valor is None or valor == "":
+                return Response({"detail": "El valor es obligatorio."}, status=400)
+            fecha = request.data.get("fecha") or str(_date.today())
+            MedicionKPI.objects.update_or_create(
+                kpi=kpi, fecha=fecha,
+                defaults={"valor": valor, "nota": request.data.get("nota", ""),
+                          "registrado_por": request.user})
+            # Actualiza el valor actual del KPI con la última medición.
+            ultima = kpi.mediciones.order_by("-fecha").first()
+            if ultima:
+                kpi.valor_actual = ultima.valor
+                kpi.save(update_fields=["valor_actual"])
+            registrar_actividad(kpi, request.user, "ACTUALIZO", f"registró medición {valor}")
+
+        mediciones = list(kpi.mediciones.order_by("fecha"))
+        meta = float(kpi.meta or 0)
+        serie = []
+        for m in mediciones:
+            v = float(m.valor)
+            cumple = (v <= meta) if kpi.sentido == "MENOR" else (v >= meta)
+            serie.append({"fecha": str(m.fecha), "valor": v, "meta": meta,
+                          "nota": m.nota, "cumple": cumple})
+        # Semáforo del valor actual.
+        actual = float(kpi.valor_actual or 0)
+        if kpi.sentido == "MENOR":
+            ratio = (meta / actual) if actual else 1
+        else:
+            ratio = (actual / meta) if meta else 0
+        semaforo = "verde" if ratio >= 1 else "amarillo" if ratio >= 0.85 else "rojo"
+        return Response({
+            "kpi": kpi.nombre, "unidad": kpi.unidad, "meta": meta, "sentido": kpi.sentido,
+            "valor_actual": actual, "cumple": kpi.cumple, "semaforo": semaforo,
+            "mediciones": serie,
+        })
 
 
 class CapacitacionViewSet(_Colaborativo):
-    queryset = Capacitacion.objects.select_related("responsable_user")
+    queryset = Capacitacion.objects.select_related("responsable_user").prefetch_related(
+        "participantes_lista__empleado")
     serializer_class = CapacitacionSerializer
     filterset_fields = ["empresa", "estado", "responsable_user"]
+
+    @action(detail=True, methods=["post"], url_path="reprogramar-recuperacion")
+    def reprogramar_recuperacion(self, request, pk=None):
+        """Crea una NUEVA edición (curso de recuperación) del mismo curso y mueve
+        ahí a los reprobados/ausentes para que lo presenten de nuevo, con un
+        intento adicional. Los originales quedan marcados como reprogramados."""
+        from datetime import date as _date
+        origen = self.get_object()
+        # ¿Qué participantes reprogramar? Si se pasan ids, solo esos; si no, todos
+        # los reprobados/ausentes aún no reprogramados de esta capacitación.
+        ids_part = request.data.get("participantes")
+        pendientes = origen.participantes_lista.filter(
+            estado__in=["NO_APROBADO", "AUSENTE"], reprogramado=False)
+        if ids_part:
+            pendientes = pendientes.filter(id__in=ids_part)
+        pendientes = list(pendientes.select_related("empleado"))
+        if not pendientes:
+            return Response({"detail": "No hay reprobados por reprogramar."}, status=400)
+
+        fecha = request.data.get("fecha") or None
+
+        # Crea la nueva edición copiando los datos del curso.
+        nueva = Capacitacion.objects.create(
+            empresa=origen.empresa,
+            curso=origen.curso,
+            descripcion=origen.descripcion,
+            instructor=origen.instructor,
+            responsable_user=origen.responsable_user,
+            fecha=fecha,
+            vigencia_meses=origen.vigencia_meses,
+            requiere_calificacion=origen.requiere_calificacion,
+            calificacion_minima=origen.calificacion_minima,
+            estado="PROGRAMADA",
+        )
+        movidos = 0
+        for p in pendientes:
+            ParticipanteCapacitacion.objects.create(
+                capacitacion=nueva,
+                empleado=p.empleado,
+                nombre=p.nombre,
+                estado="INSCRITO",
+                intentos=(p.intentos or 1) + 1,
+            )
+            if p.empleado_id:
+                nueva.empleados.add(p.empleado)
+            p.reprogramado = True
+            p.save(update_fields=["reprogramado"])
+            movidos += 1
+
+        registrar_actividad(origen, request.user, "CREO",
+                            f"reprogramó recuperación de {movidos} reprobado(s) a una nueva edición")
+        return Response({"nueva_capacitacion": nueva.id, "movidos": movidos,
+                         "curso": nueva.curso}, status=201)
+
+    @action(detail=False, methods=["get"], url_path="pendientes-recapacitacion")
+    def pendientes_recapacitacion(self, request):
+        """Lista de participantes que NO aprobaron y deben volver a presentar el
+        curso (estado NO_APROBADO o AUSENTE), aún no reprogramados a otra edición."""
+        ids = self._scoped_ids(request)
+        qs = (ParticipanteCapacitacion.objects
+              .filter(capacitacion__empresa_id__in=ids, estado__in=["NO_APROBADO", "AUSENTE"],
+                      reprogramado=False)
+              .select_related("capacitacion", "empleado")
+              .order_by("capacitacion__curso", "id"))
+        out = []
+        for p in qs:
+            out.append({
+                "id": p.id,
+                "nombre": p.nombre_display,
+                "empleado": p.empleado_id,
+                "empleado_numero": p.empleado.numero_empleado if p.empleado_id else None,
+                "curso": p.capacitacion.curso,
+                "capacitacion_id": p.capacitacion_id,
+                "estado": p.estado,
+                "estado_display": p.get_estado_display(),
+                "calificacion": float(p.calificacion) if p.calificacion is not None else None,
+                "calificacion_minima": float(p.capacitacion.calificacion_minima),
+                "intentos": p.intentos,
+                "fecha": p.capacitacion.fecha,
+            })
+        return Response({"total": len(out), "resultados": out})
+
+    def _scoped_ids(self, request):
+        ids = list(_empresas(request.user))
+        emp = request.query_params.get("empresa")
+        return [int(emp)] if emp and int(emp) in ids else ids
+
+
+class ParticipanteCapacitacionViewSet(viewsets.ModelViewSet):
+    """Participantes individuales de una capacitación (calificación, evidencia,
+    estado por persona). Soporta empleados de RH o participantes externos."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ParticipanteCapacitacionSerializer
+    filterset_fields = ["capacitacion", "empleado", "estado"]
+
+    def get_queryset(self):
+        return (ParticipanteCapacitacion.objects
+                .filter(capacitacion__empresa__in=_empresas(self.request.user))
+                .select_related("empleado", "capacitacion"))
+
+    def _aplicar_calificacion(self, obj):
+        """Si el curso requiere calificación y hay nota, fija aprobado/no aprobado."""
+        cap = obj.capacitacion
+        if obj.calificacion is not None and cap.requiere_calificacion:
+            obj.evaluar_estado(cap.calificacion_minima)
+            obj.save(update_fields=["estado"])
+
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        self._aplicar_calificacion(obj)
+        # Si el participante es un empleado de RH, vincúlalo también al M2M
+        # para que la capacitación aparezca en su portal del empleado.
+        if obj.empleado_id:
+            obj.capacitacion.empleados.add(obj.empleado)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        self._aplicar_calificacion(obj)
+
+    @action(detail=True, methods=["post"], url_path="evidencia")
+    def subir_evidencia(self, request, pk=None):
+        """Sube la constancia/evidencia individual del participante (multipart)."""
+        p = self.get_object()
+        archivo = request.FILES.get("archivo")
+        if not archivo:
+            return Response({"detail": "Adjunta el archivo en el campo 'archivo'."}, status=400)
+        p.evidencia = archivo
+        p.evidencia_nombre = getattr(archivo, "name", "")[:200]
+        p.save(update_fields=["evidencia", "evidencia_nombre"])
+        return Response(ParticipanteCapacitacionSerializer(p, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="reinscribir")
+    def reinscribir(self, request, pk=None):
+        """Reinscribe a un participante que no aprobó: borra su calificación,
+        lo regresa a INSCRITO e incrementa el número de intentos. El curso debe
+        repetirse hasta aprobar."""
+        p = self.get_object()
+        p.intentos = (p.intentos or 1) + 1
+        p.calificacion = None
+        p.estado = "INSCRITO"
+        p.save(update_fields=["intentos", "calificacion", "estado"])
+        return Response(ParticipanteCapacitacionSerializer(p, context={"request": request}).data)
+
+    @action(detail=True, methods=["get"], url_path="constancia")
+    def constancia(self, request, pk=None):
+        """Genera la constancia PDF del participante (si aprobó o el curso es solo
+        asistencia). Reconocimiento oficial de la capacitación recibida."""
+        from django.http import HttpResponse
+        p = self.get_object()
+        cap = p.capacitacion
+        # Solo emite constancia a quien aprobó, asistió, o cursos sin calificación.
+        if cap.requiere_calificacion and p.estado not in ("APROBADO", "ASISTIO"):
+            return Response(
+                {"detail": "La constancia solo se emite a participantes aprobados."}, status=400)
+
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import landscape, letter
+        from reportlab.lib.units import cm
+        from reportlab.pdfgen import canvas as _canvas
+
+        emp = cap.empresa
+        empresa_nombre = emp.nombre_comercial or emp.razon_social or "Empresa"
+        buf = io.BytesIO()
+        W, H = landscape(letter)
+        c = _canvas.Canvas(buf, pagesize=landscape(letter))
+
+        # Marco decorativo
+        c.setStrokeColor(colors.HexColor("#1A73E8"))
+        c.setLineWidth(3)
+        c.rect(1.2 * cm, 1.2 * cm, W - 2.4 * cm, H - 2.4 * cm)
+        c.setStrokeColor(colors.HexColor("#14B8A6"))
+        c.setLineWidth(1)
+        c.rect(1.5 * cm, 1.5 * cm, W - 3.0 * cm, H - 3.0 * cm)
+
+        cx = W / 2
+        c.setFillColor(colors.HexColor("#0F172A"))
+        c.setFont("Helvetica-Bold", 12)
+        c.drawCentredString(cx, H - 2.6 * cm, empresa_nombre.upper())
+        c.setFont("Helvetica", 9)
+        c.setFillColor(colors.HexColor("#64748B"))
+        c.drawCentredString(cx, H - 3.1 * cm, "Sistema de Gestión de Calidad ISO 9001:2015")
+
+        c.setFont("Helvetica-Bold", 30)
+        c.setFillColor(colors.HexColor("#1A73E8"))
+        c.drawCentredString(cx, H - 5.2 * cm, "CONSTANCIA")
+        c.setFont("Helvetica", 12)
+        c.setFillColor(colors.HexColor("#334155"))
+        c.drawCentredString(cx, H - 6.1 * cm, "Se otorga la presente constancia a:")
+
+        c.setFont("Helvetica-Bold", 22)
+        c.setFillColor(colors.HexColor("#0F172A"))
+        c.drawCentredString(cx, H - 7.6 * cm, p.nombre_display)
+        # Subrayado del nombre
+        c.setStrokeColor(colors.HexColor("#14B8A6"))
+        c.setLineWidth(1)
+        nw = c.stringWidth(p.nombre_display, "Helvetica-Bold", 22)
+        c.line(cx - nw / 2 - 20, H - 7.9 * cm, cx + nw / 2 + 20, H - 7.9 * cm)
+
+        c.setFont("Helvetica", 12)
+        c.setFillColor(colors.HexColor("#334155"))
+        c.drawCentredString(cx, H - 8.8 * cm, "por haber concluido satisfactoriamente el curso:")
+        c.setFont("Helvetica-Bold", 16)
+        c.setFillColor(colors.HexColor("#1A73E8"))
+        c.drawCentredString(cx, H - 9.7 * cm, f"“{cap.curso}”")
+
+        # Detalles
+        c.setFont("Helvetica", 11)
+        c.setFillColor(colors.HexColor("#475569"))
+        detalles = []
+        if cap.instructor:
+            detalles.append(f"Instructor: {cap.instructor}")
+        if cap.fecha:
+            detalles.append(f"Fecha: {cap.fecha.strftime('%d/%m/%Y')}")
+        if cap.requiere_calificacion and p.calificacion is not None:
+            detalles.append(f"Calificación: {p.calificacion}")
+        if detalles:
+            c.drawCentredString(cx, H - 10.7 * cm, "   ·   ".join(detalles))
+        if cap.fecha_vencimiento:
+            c.setFillColor(colors.HexColor("#94A3B8"))
+            c.setFont("Helvetica-Oblique", 9)
+            c.drawCentredString(cx, H - 11.3 * cm, f"Vigencia hasta: {cap.fecha_vencimiento.strftime('%d/%m/%Y')}")
+
+        # Firmas
+        y_firma = 2.6 * cm
+        for fx, rol in [(cx - 6 * cm, "Instructor"), (cx + 6 * cm, "Responsable de Calidad")]:
+            c.setStrokeColor(colors.HexColor("#94A3B8"))
+            c.setLineWidth(0.7)
+            c.line(fx - 3.5 * cm, y_firma, fx + 3.5 * cm, y_firma)
+            c.setFont("Helvetica", 9)
+            c.setFillColor(colors.HexColor("#64748B"))
+            c.drawCentredString(fx, y_firma - 0.5 * cm, rol)
+
+        from datetime import date as _date
+        c.setFont("Helvetica", 8)
+        c.setFillColor(colors.HexColor("#CBD5E1"))
+        c.drawCentredString(cx, 1.8 * cm, f"Emitida el {_date.today().strftime('%d/%m/%Y')} · Folio CONST-{cap.id}-{p.id}")
+
+        c.showPage()
+        c.save()
+        pdf = buf.getvalue()
+        resp = HttpResponse(pdf, content_type="application/pdf")
+        nombre_arch = f"constancia-{p.nombre_display.replace(' ', '_')}-{cap.id}.pdf"
+        resp["Content-Disposition"] = f'inline; filename="{nombre_arch}"'
+        return resp
 
 
 class EquipoViewSet(_Colaborativo):
@@ -256,13 +649,17 @@ class EquipoViewSet(_Colaborativo):
     filterset_fields = ["empresa", "activo", "responsable_user"]
 
 
-class EvaluacionProveedorViewSet(_Scoped):
-    queryset = EvaluacionProveedor.objects.select_related("proveedor")
+class EvaluacionProveedorViewSet(_Colaborativo):
+    queryset = EvaluacionProveedor.objects.select_related("proveedor", "responsable_user")
     serializer_class = EvaluacionProveedorSerializer
-    filterset_fields = ["empresa", "proveedor"]
+    filterset_fields = ["empresa", "proveedor", "estado", "responsable_user"]
+
+    def _label(self, obj):
+        return f"evaluación de {obj.proveedor.razon_social} ({obj.periodo})"
 
     def perform_create(self, serializer):
-        ev = serializer.save()
+        super().perform_create(serializer)  # trazabilidad + notifica al responsable
+        ev = serializer.instance
         # Alerta automática: si el proveedor cae a clasificación D (<70),
         # notifica a la dirección/calidad de la empresa.
         if float(ev.puntaje) < 70:
@@ -278,10 +675,10 @@ class EvaluacionProveedorViewSet(_Scoped):
                       url="/sgc/evaluacion-proveedores")
 
 
-class QuejaViewSet(_Scoped):
-    queryset = Queja.objects.all()
+class QuejaViewSet(_Colaborativo):
+    queryset = Queja.objects.select_related("responsable_user")
     serializer_class = QuejaSerializer
-    filterset_fields = ["empresa", "tipo", "estado"]
+    filterset_fields = ["empresa", "tipo", "estado", "responsable_user"]
 
     @action(detail=True, methods=["post"])
     def escalar(self, request, pk=None):
@@ -291,10 +688,41 @@ class QuejaViewSet(_Scoped):
         nc = NoConformidad.objects.create(
             empresa=q.empresa, tipo="CORRECTIVA", origen="QUEJA",
             descripcion=f"[Queja {q.folio or q.id}] {q.descripcion}", estado="ABIERTA",
+            responsable_user=q.responsable_user,
         )
         q.no_conformidad = nc
         q.estado = "EN_PROCESO"
         q.save(update_fields=["no_conformidad", "estado"])
+        registrar_actividad(q, request.user, "CAMBIO_ESTADO",
+                            f"escaló la queja a la no conformidad {nc.folio}")
+        return Response({"no_conformidad": nc.id})
+
+
+class SalidaNoConformeViewSet(_Colaborativo):
+    """Control de salidas no conformes (ISO 9001 8.7)."""
+    queryset = SalidaNoConforme.objects.select_related("responsable_user", "proceso_ref", "no_conformidad")
+    serializer_class = SalidaNoConformeSerializer
+    filterset_fields = ["empresa", "estado", "origen", "disposicion", "responsable_user"]
+
+    def _label(self, obj):
+        return f"salida no conforme {obj.folio}"
+
+    @action(detail=True, methods=["post"])
+    def escalar(self, request, pk=None):
+        """Eleva la salida no conforme a una No Conformidad del sistema (10.2)
+        cuando el problema es recurrente o grave."""
+        snc = self.get_object()
+        if snc.no_conformidad_id:
+            return Response({"detail": "Ya escalada.", "no_conformidad": snc.no_conformidad_id})
+        nc = NoConformidad.objects.create(
+            empresa=snc.empresa, tipo="CORRECTIVA", origen="PROCESO",
+            descripcion=f"[Salida no conforme {snc.folio}] {snc.descripcion}",
+            estado="ABIERTA", responsable_user=snc.responsable_user,
+        )
+        snc.no_conformidad = nc
+        snc.save(update_fields=["no_conformidad"])
+        registrar_actividad(snc, request.user, "CAMBIO_ESTADO",
+                            f"escaló a la no conformidad {nc.folio}")
         return Response({"no_conformidad": nc.id})
 
 
@@ -310,10 +738,13 @@ class ObjetivoCalidadViewSet(_Colaborativo):
     filterset_fields = ["empresa", "estado", "responsable_user"]
 
 
-class ElementoContextoViewSet(_Scoped):
-    queryset = ElementoContexto.objects.all()
+class ElementoContextoViewSet(_Colaborativo):
+    queryset = ElementoContexto.objects.select_related("responsable_user")
     serializer_class = ElementoContextoSerializer
-    filterset_fields = ["empresa", "tipo"]
+    filterset_fields = ["empresa", "tipo", "responsable_user"]
+
+    def _label(self, obj):
+        return f"factor FODA: {obj.descripcion[:40]}"
 
 
 class ParteInteresadaViewSet(_Scoped):
@@ -607,6 +1038,379 @@ class DashboardSGCViewSet(viewsets.ViewSet):
         }
         return Response({"eventos": ev, "resumen": resumen})
 
+    @action(detail=False, methods=["get"])
+    def panorama(self, request):
+        """Panorama ejecutivo del SGC para el centro de mando: cumplimiento por
+        cláusula ISO, índice de madurez multidimensional y carga del equipo."""
+        ids = self._emp(request)
+        hoy = date.today()
+        puntos = {"NO": 0, "PARCIAL": 50, "SI": 100}
+
+        # ── Cumplimiento por capítulo ISO (4 a 10) ──────────────────────────
+        evals = list(EvaluacionRequisito.objects.filter(empresa_id__in=ids)
+                     .exclude(cumple="NA").select_related("requisito"))
+        por_cap: dict[str, dict] = {}
+        for e in evals:
+            cap = (e.requisito.clausula or "0").split(".")[0]
+            d = por_cap.setdefault(cap, {"suma": 0, "n": 0})
+            d["suma"] += puntos.get(e.cumple, 0)
+            d["n"] += 1
+        CAP_NOMBRE = {
+            "4": "Contexto", "5": "Liderazgo", "6": "Planificación",
+            "7": "Apoyo / Recursos", "8": "Operación",
+            "9": "Evaluación", "10": "Mejora",
+        }
+        capitulos = []
+        for cap in ["4", "5", "6", "7", "8", "9", "10"]:
+            d = por_cap.get(cap)
+            pct = round(d["suma"] / d["n"], 1) if d and d["n"] else 0
+            capitulos.append({
+                "capitulo": cap, "nombre": CAP_NOMBRE.get(cap, cap),
+                "cumplimiento": pct, "evaluados": d["n"] if d else 0,
+            })
+        evaluados = len(evals)
+        cumplimiento = round(sum(puntos.get(e.cumple, 0) for e in evals) / evaluados, 1) if evaluados else 0
+
+        # ── Índice de madurez (radar multidimensional) ──────────────────────
+        impl = TareaImplementacion.objects.filter(empresa_id__in=ids)
+        impl_total = impl.count()
+        impl_pct = round(impl.filter(columna="VERIFICADO").count() / impl_total * 100, 1) if impl_total else 0
+        objs = ObjetivoCalidad.objects.filter(empresa_id__in=ids)
+        obj_pct = round(sum(o.avance for o in objs) / objs.count(), 1) if objs.count() else 0
+        kpis = list(IndicadorKPI.objects.filter(empresa_id__in=ids))
+        kpis_pct = round(sum(1 for k in kpis if k.cumple) / len(kpis) * 100, 1) if kpis else 0
+        nc = NoConformidad.objects.filter(empresa_id__in=ids)
+        nc_total = nc.count()
+        nc_pct = round(nc.filter(estado="CERRADA").count() / nc_total * 100, 1) if nc_total else 0
+        riesgos = list(Riesgo.objects.filter(empresa_id__in=ids))
+        riesgos_controlados = sum(1 for r in riesgos if r.estado in ("CONTROLADO", "ACEPTADO"))
+        riesgo_pct = round(riesgos_controlados / len(riesgos) * 100, 1) if riesgos else 0
+        dimensiones = [
+            {"dim": "Cumplimiento ISO", "valor": cumplimiento},
+            {"dim": "Implementación", "valor": impl_pct},
+            {"dim": "Objetivos", "valor": obj_pct},
+            {"dim": "KPIs en meta", "valor": kpis_pct},
+            {"dim": "NC resueltas", "valor": nc_pct},
+            {"dim": "Riesgos controlados", "valor": riesgo_pct},
+        ]
+        madurez = round(sum(d["valor"] for d in dimensiones) / len(dimensiones), 1)
+        if madurez >= 85:
+            nivel = "Consolidado"
+        elif madurez >= 65:
+            nivel = "Maduro"
+        elif madurez >= 40:
+            nivel = "En desarrollo"
+        else:
+            nivel = "Inicial"
+
+        # ── Carga del equipo (quién tiene qué asignado y abierto) ───────────
+        emp_id = ids[0] if ids else None
+        empresa = Empresa.objects.filter(id=emp_id).first() if emp_id else None
+        carga = []
+        if empresa:
+            fuentes = [
+                (NoConformidad, "responsable_user", {"estado__in": ["ABIERTA", "EN_PROCESO"]}),
+                (Riesgo, "responsable_user", {"estado__in": ["IDENTIFICADO", "EN_TRATAMIENTO"]}),
+                (Auditoria, "auditor_lider_user", {"estado__in": ["PROGRAMADA", "EN_CURSO"]}),
+                (Capacitacion, "responsable_user", {"estado__in": ["PROGRAMADA"]}),
+                (Equipo, "responsable_user", {"activo": True}),
+                (ObjetivoCalidad, "responsable_user", {"estado": "EN_CURSO"}),
+                (TareaImplementacion, "responsable_user", {"columna__in": ["POR_HACER", "EN_PROCESO"]}),
+                (AccionCAPA, "responsable_user", {"estado__in": ["PENDIENTE", "EN_PROCESO"]}),
+                (Queja, "responsable_user", {"estado__in": ["ABIERTA", "EN_PROCESO"]}),
+                (IndicadorKPI, "responsable_user", {}),
+                (EvaluacionProveedor, "responsable_user", {"estado__in": ["EVALUADO", "SEGUIMIENTO"]}),
+                (SalidaNoConforme, "responsable_user", {"estado__in": ["ABIERTA", "EN_TRATAMIENTO"]}),
+            ]
+            conteo: dict[int, int] = {}
+            for modelo, campo, filtro in fuentes:
+                base = (modelo.objects.filter(no_conformidad__empresa_id=emp_id)
+                        if modelo is AccionCAPA else modelo.objects.filter(empresa_id=emp_id))
+                qs = base.filter(**filtro).exclude(**{f"{campo}__isnull": True})
+                for uid in qs.values_list(f"{campo}_id", flat=True):
+                    if uid:
+                        conteo[uid] = conteo.get(uid, 0) + 1
+            carga = MiembroSerializer(miembros_empresa(empresa), many=True,
+                                      context={"empresa_id": emp_id}).data
+            for m in carga:
+                m["asignados_abiertos"] = conteo.get(m["id"], 0)
+            carga.sort(key=lambda x: x["asignados_abiertos"], reverse=True)
+
+        return Response({
+            "madurez": madurez, "nivel": nivel,
+            "cumplimiento_iso": cumplimiento,
+            "requisitos_evaluados": evaluados,
+            "requisitos_total": RequisitoISO.objects.count(),
+            "capitulos": capitulos,
+            "dimensiones": dimensiones,
+            "carga_equipo": carga,
+        })
+
+    @action(detail=False, methods=["get"])
+    def tendencias(self, request):
+        """Evolución histórica de la madurez del SGC + proyección a la meta +
+        alertas inteligentes. Registra/actualiza el snapshot del día."""
+        from datetime import timedelta
+        from .models import SnapshotMadurez
+        ids = self._emp(request)
+        emp_id = ids[0] if ids else None
+        if not emp_id:
+            return Response({"detail": "Empresa inválida."}, status=400)
+        hoy = date.today()
+
+        # Recalcula los indicadores actuales (reusa lógica de panorama).
+        pan = self.panorama(request).data
+        nc = NoConformidad.objects.filter(empresa_id=emp_id)
+        riesgos = list(Riesgo.objects.filter(empresa_id=emp_id))
+        kpis = list(IndicadorKPI.objects.filter(empresa_id=emp_id))
+        objs = ObjetivoCalidad.objects.filter(empresa_id=emp_id)
+        quejas = Queja.objects.filter(empresa_id=emp_id).exclude(satisfaccion__isnull=True)
+        sat = quejas.aggregate(p=Avg("satisfaccion"))["p"]
+
+        # Registra/actualiza snapshot del día.
+        SnapshotMadurez.objects.update_or_create(
+            empresa_id=emp_id, fecha=hoy,
+            defaults={
+                "madurez": pan["madurez"], "cumplimiento_iso": pan["cumplimiento_iso"],
+                "nc_abiertas": nc.filter(estado__in=["ABIERTA", "EN_PROCESO"]).count(),
+                "nc_cerradas": nc.filter(estado="CERRADA").count(),
+                "riesgos_altos": sum(1 for r in riesgos if r.severidad in ("ALTO", "CRITICO")),
+                "kpis_en_meta": sum(1 for k in kpis if k.cumple), "kpis_total": len(kpis),
+                "objetivos_logrados": objs.filter(estado="LOGRADO").count(),
+                "satisfaccion": round(sat, 2) if sat else None,
+            })
+
+        # Serie histórica (últimos 12 snapshots).
+        snaps = list(SnapshotMadurez.objects.filter(empresa_id=emp_id).order_by("fecha"))[-12:]
+        serie = [{"fecha": str(s.fecha), "madurez": float(s.madurez),
+                  "cumplimiento": float(s.cumplimiento_iso),
+                  "nc_abiertas": s.nc_abiertas, "kpis_pct": round(s.kpis_en_meta / s.kpis_total * 100, 1) if s.kpis_total else 0}
+                 for s in snaps]
+
+        # Proyección lineal simple a 85% (meta de certificación).
+        proyeccion = None
+        if len(serie) >= 2:
+            primero, ultimo = serie[0], serie[-1]
+            d0 = date.fromisoformat(primero["fecha"])
+            d1 = date.fromisoformat(ultimo["fecha"])
+            dias = (d1 - d0).days or 1
+            delta = ultimo["madurez"] - primero["madurez"]
+            ritmo = delta / dias  # puntos por día
+            actual = ultimo["madurez"]
+            if ritmo > 0.001 and actual < 85:
+                dias_faltan = (85 - actual) / ritmo
+                proyeccion = {
+                    "ritmo_mensual": round(ritmo * 30, 1),
+                    "dias_estimados": int(dias_faltan),
+                    "fecha_estimada": str(hoy + timedelta(days=int(dias_faltan))),
+                    "meta": 85,
+                }
+            elif actual >= 85:
+                proyeccion = {"listo": True, "meta": 85}
+            else:
+                proyeccion = {"ritmo_mensual": round(ritmo * 30, 1), "meta": 85}
+
+        # Alertas inteligentes.
+        alertas = []
+        venc_pronto = nc.filter(estado__in=["ABIERTA", "EN_PROCESO"],
+                                fecha_compromiso__gte=hoy,
+                                fecha_compromiso__lte=hoy + timedelta(days=7))
+        if venc_pronto.exists():
+            alertas.append({"nivel": "alta", "tipo": "NC",
+                            "mensaje": f"{venc_pronto.count()} no conformidad(es) vencen esta semana",
+                            "ruta": "/sgc/no-conformidades"})
+        nc_venc = nc.filter(estado__in=["ABIERTA", "EN_PROCESO"], fecha_compromiso__lt=hoy)
+        if nc_venc.exists():
+            alertas.append({"nivel": "critica", "tipo": "NC",
+                            "mensaje": f"{nc_venc.count()} no conformidad(es) ya están vencidas",
+                            "ruta": "/sgc/no-conformidades"})
+        rc = sum(1 for r in riesgos if r.severidad == "CRITICO")
+        if rc:
+            alertas.append({"nivel": "alta", "tipo": "RIESGO",
+                            "mensaje": f"{rc} riesgo(s) en nivel crítico sin controlar",
+                            "ruta": "/sgc/riesgos"})
+        equipos_venc = Equipo.objects.filter(empresa_id=emp_id, requiere_calibracion=True,
+                                             activo=True, fecha_proxima_calibracion__lt=hoy).count()
+        if equipos_venc:
+            alertas.append({"nivel": "media", "tipo": "CALIBRACION",
+                            "mensaje": f"{equipos_venc} equipo(s) con calibración vencida",
+                            "ruta": "/sgc/equipos"})
+        kpis_bajo = sum(1 for k in kpis if not k.cumple)
+        if kpis_bajo:
+            alertas.append({"nivel": "media", "tipo": "KPI",
+                            "mensaje": f"{kpis_bajo} indicador(es) fuera de meta",
+                            "ruta": "/sgc/kpis"})
+
+        # Comparativa vs snapshot anterior (usa los objetos snapshot completos).
+        comparativa = None
+        if len(snaps) >= 2:
+            a0, a1 = snaps[-2], snaps[-1]
+            comparativa = {
+                "madurez_delta": round(float(a1.madurez) - float(a0.madurez), 1),
+                "cumplimiento_iso_delta": round(float(a1.cumplimiento_iso) - float(a0.cumplimiento_iso), 1),
+                "nc_delta": a1.nc_abiertas - a0.nc_abiertas,
+                "riesgos_altos_delta": a1.riesgos_altos - a0.riesgos_altos,
+                "kpis_en_meta_delta": a1.kpis_en_meta - a0.kpis_en_meta,
+            }
+
+        return Response({
+            "serie": serie, "proyeccion": proyeccion, "alertas": alertas,
+            "comparativa": comparativa, "madurez_actual": pan["madurez"],
+        })
+
+    @action(detail=False, methods=["get"], url_path="analisis-nc")
+    def analisis_nc(self, request):
+        """Analítica de no conformidades: Pareto de categorías de causa, origen
+        (distribución), tendencia mensual y tiempo promedio de cierre."""
+        from datetime import timedelta
+        ids = self._emp(request)
+        ncs = list(NoConformidad.objects.filter(empresa_id__in=ids))
+        total = len(ncs)
+
+        # Pareto por categoría de causa (6M).
+        cat_label = dict(NoConformidad._meta.get_field("categoria_causa").choices)
+        cat_count = {}
+        for n in ncs:
+            if n.categoria_causa:
+                cat_count[n.categoria_causa] = cat_count.get(n.categoria_causa, 0) + 1
+        pareto = sorted(
+            [{"categoria": k, "label": cat_label.get(k, k), "n": v} for k, v in cat_count.items()],
+            key=lambda x: x["n"], reverse=True)
+        acum = 0
+        suma_cat = sum(x["n"] for x in pareto) or 1
+        for x in pareto:
+            acum += x["n"]
+            x["acumulado_pct"] = round(acum / suma_cat * 100, 1)
+
+        # Origen (distribución).
+        ori_label = dict(NoConformidad.ORIGENES)
+        ori_count = {}
+        for n in ncs:
+            ori_count[n.origen] = ori_count.get(n.origen, 0) + 1
+        origen = [{"origen": k, "label": ori_label.get(k, k), "n": v}
+                  for k, v in sorted(ori_count.items(), key=lambda x: x[1], reverse=True)]
+
+        # Tendencia últimos 6 meses (detectadas vs cerradas).
+        hoy = date.today()
+        meses = []
+        for i in range(5, -1, -1):
+            y = hoy.year
+            m = hoy.month - i
+            while m <= 0:
+                m += 12
+                y -= 1
+            meses.append((y, m))
+        MN = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+        tendencia = []
+        for (y, m) in meses:
+            det = sum(1 for n in ncs if n.fecha_deteccion and n.fecha_deteccion.year == y and n.fecha_deteccion.month == m)
+            cer = sum(1 for n in ncs if n.fecha_cierre and n.fecha_cierre.year == y and n.fecha_cierre.month == m)
+            tendencia.append({"mes": f"{MN[m]} {str(y)[2:]}", "detectadas": det, "cerradas": cer})
+
+        # Tiempo promedio de cierre (días).
+        dias = [(n.fecha_cierre - n.fecha_deteccion).days for n in ncs
+                if n.fecha_cierre and n.fecha_deteccion]
+        tiempo_cierre = round(sum(dias) / len(dias), 1) if dias else None
+
+        abiertas = sum(1 for n in ncs if n.estado in ("ABIERTA", "EN_PROCESO"))
+        cerradas = sum(1 for n in ncs if n.estado == "CERRADA")
+        vencidas = sum(1 for n in ncs if n.estado in ("ABIERTA", "EN_PROCESO")
+                       and n.fecha_compromiso and n.fecha_compromiso < hoy)
+        return Response({
+            "total": total, "abiertas": abiertas, "cerradas": cerradas, "vencidas": vencidas,
+            "tiempo_cierre_promedio": tiempo_cierre,
+            "tasa_cierre": round(cerradas / total * 100, 1) if total else 0,
+            "pareto": pareto, "origen": origen, "tendencia": tendencia,
+        })
+
+    @action(detail=False, methods=["get"])
+    def checklist_auditoria(self, request):
+        """Checklist de auditoría por cláusula ISO para preparar la certificación.
+
+        Por cada requisito de la norma devuelve: cláusula, título, estado de
+        cumplimiento (del diagnóstico), evidencia declarada, hallazgos de
+        auditoría ligados y un veredicto. Agrupado por capítulo (4-10)."""
+        ids = self._emp(request)
+        norma_id = request.query_params.get("norma")
+
+        reqs = RequisitoISO.objects.select_related("norma").all()
+        if norma_id:
+            reqs = reqs.filter(norma_id=norma_id)
+        reqs = list(reqs)
+
+        # Evaluaciones del diagnóstico indexadas por requisito.
+        evals = {e.requisito_id: e for e in
+                 EvaluacionRequisito.objects.filter(empresa_id__in=ids, requisito__in=reqs)}
+        # Hallazgos de auditoría por requisito.
+        hallazgos_por_req: dict[int, list] = {}
+        for h in (Hallazgo.objects.filter(auditoria__empresa_id__in=ids, requisito__in=reqs)
+                  .select_related("auditoria")):
+            hallazgos_por_req.setdefault(h.requisito_id, []).append({
+                "tipo": h.tipo, "tipo_display": h.get_tipo_display(),
+                "descripcion": h.descripcion, "auditoria": h.auditoria.titulo,
+            })
+
+        CAP_NOMBRE = {
+            "4": "Contexto de la organización", "5": "Liderazgo", "6": "Planificación",
+            "7": "Apoyo", "8": "Operación", "9": "Evaluación del desempeño", "10": "Mejora",
+        }
+
+        def clave_orden(clausula):
+            partes = []
+            for p in (clausula or "0").split("."):
+                try:
+                    partes.append(int(p))
+                except ValueError:
+                    partes.append(0)
+            return partes
+
+        reqs.sort(key=lambda r: clave_orden(r.clausula))
+        por_cap: dict[str, dict] = {}
+        veredictos = {"NO": "No conforme", "PARCIAL": "Conforme con observación",
+                      "SI": "Conforme", "NA": "No aplica"}
+        for r in reqs:
+            cap = (r.clausula or "0").split(".")[0]
+            ev = evals.get(r.id)
+            cumple = ev.cumple if ev else "PENDIENTE"
+            grupo = por_cap.setdefault(cap, {
+                "capitulo": cap, "nombre": CAP_NOMBRE.get(cap, f"Capítulo {cap}"),
+                "items": [], "conforme": 0, "total": 0,
+            })
+            item = {
+                "id": r.id, "clausula": r.clausula, "titulo": r.titulo,
+                "descripcion": r.descripcion,
+                "cumple": cumple,
+                "veredicto": veredictos.get(cumple, "Pendiente de evaluar"),
+                "evidencia": ev.evidencia if ev else "",
+                "observaciones": ev.observaciones if ev else "",
+                "hallazgos": hallazgos_por_req.get(r.id, []),
+            }
+            grupo["items"].append(item)
+            grupo["total"] += 1
+            if cumple == "SI":
+                grupo["conforme"] += 1
+
+        capitulos = []
+        for cap in sorted(por_cap, key=lambda c: int(c) if c.isdigit() else 99):
+            g = por_cap[cap]
+            g["cumplimiento"] = round(g["conforme"] / g["total"] * 100, 1) if g["total"] else 0
+            capitulos.append(g)
+
+        total = sum(g["total"] for g in capitulos)
+        conformes = sum(g["conforme"] for g in capitulos)
+        no_conformes = sum(1 for r in reqs if (evals.get(r.id) and evals[r.id].cumple == "NO"))
+        observaciones = sum(1 for r in reqs if (evals.get(r.id) and evals[r.id].cumple == "PARCIAL"))
+        pendientes = sum(1 for r in reqs if r.id not in evals)
+        return Response({
+            "capitulos": capitulos,
+            "resumen": {
+                "total": total, "conformes": conformes, "no_conformes": no_conformes,
+                "observaciones": observaciones, "pendientes": pendientes,
+                "cumplimiento": round(conformes / total * 100, 1) if total else 0,
+                "listo_certificacion": no_conformes == 0 and pendientes == 0,
+            },
+        })
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # COLABORACIÓN MULTI-USUARIO (Pilar 1)
@@ -627,6 +1431,60 @@ class MiembrosViewSet(viewsets.ViewSet):
         data = MiembroSerializer(miembros_empresa(empresa), many=True,
                                  context={"empresa_id": emp_id}).data
         return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def carga(self, request):
+        """Carga de trabajo del equipo del SGC: por cada usuario con acceso al
+        módulo, cuántos registros tiene asignados y abiertos. Permite repartir
+        el trabajo entre todos los miembros de forma equitativa (9.1)."""
+        ids = list(_empresas(request.user))
+        emp = request.query_params.get("empresa")
+        emp_id = int(emp) if (emp and int(emp) in ids) else (ids[0] if ids else None)
+        if not emp_id:
+            return Response([])
+        empresa = Empresa.objects.filter(id=emp_id).first()
+        if not empresa:
+            return Response([])
+
+        # (modelo, campo_asignacion, filtro_abierto) por cada tipo asignable.
+        fuentes = [
+            (NoConformidad, "responsable_user", {"estado__in": ["ABIERTA", "EN_PROCESO"]}),
+            (Riesgo, "responsable_user", {"estado__in": ["IDENTIFICADO", "EN_TRATAMIENTO"]}),
+            (Auditoria, "auditor_lider_user", {"estado__in": ["PROGRAMADA", "EN_CURSO"]}),
+            (Capacitacion, "responsable_user", {"estado__in": ["PROGRAMADA"]}),
+            (Equipo, "responsable_user", {"activo": True}),
+            (ObjetivoCalidad, "responsable_user", {"estado": "EN_CURSO"}),
+            (TareaImplementacion, "responsable_user", {"columna__in": ["POR_HACER", "EN_PROCESO"]}),
+            (AccionCAPA, "responsable_user", {"estado__in": ["PENDIENTE", "EN_PROCESO"]}),
+            (Queja, "responsable_user", {"estado__in": ["ABIERTA", "EN_PROCESO"]}),
+            (IndicadorKPI, "responsable_user", {}),
+            (EvaluacionProveedor, "responsable_user", {"estado__in": ["EVALUADO", "SEGUIMIENTO"]}),
+            (SalidaNoConforme, "responsable_user", {"estado__in": ["ABIERTA", "EN_TRATAMIENTO"]}),
+        ]
+        # AccionCAPA no tiene FK empresa directa; se filtra por la NC padre.
+        conteo: dict[int, dict] = {}
+        for modelo, campo, filtro_abierto in fuentes:
+            if modelo is AccionCAPA:
+                base = modelo.objects.filter(no_conformidad__empresa_id=emp_id)
+            else:
+                base = modelo.objects.filter(empresa_id=emp_id)
+            qs = base.filter(**filtro_abierto).exclude(**{f"{campo}__isnull": True})
+            for uid in qs.values_list(f"{campo}_id", flat=True):
+                if uid is None:
+                    continue
+                conteo.setdefault(uid, {"asignados": 0, "por_tipo": {}})
+                conteo[uid]["asignados"] += 1
+                clave = modelo._meta.model_name
+                conteo[uid]["por_tipo"][clave] = conteo[uid]["por_tipo"].get(clave, 0) + 1
+
+        miembros = MiembroSerializer(miembros_empresa(empresa), many=True,
+                                     context={"empresa_id": emp_id}).data
+        for m in miembros:
+            c = conteo.get(m["id"], {"asignados": 0, "por_tipo": {}})
+            m["asignados_abiertos"] = c["asignados"]
+            m["por_tipo"] = c["por_tipo"]
+        miembros.sort(key=lambda x: x["asignados_abiertos"], reverse=True)
+        return Response(miembros)
 
 
 class ComentarioViewSet(viewsets.ModelViewSet):
@@ -1230,3 +2088,618 @@ class EvaluacionDetalleViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         ev = instance.evaluacion; instance.delete(); ev.recomputar()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ECOSISTEMA DE CERTIFICACIÓN
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Roadmap estándar de certificación ISO 9001 (fase, título, cláusula, ruta).
+ROADMAP_BASE = [
+    ("DIAGNOSTICO", "Realizar el diagnóstico inicial (gap analysis)", "4-10", "/sgc/diagnostico"),
+    ("DIAGNOSTICO", "Definir el contexto y partes interesadas (FODA)", "4.1", "/sgc/contexto"),
+    ("DIAGNOSTICO", "Determinar el alcance del SGC", "4.3", "/sgc/contexto"),
+    ("PLANEACION", "Redactar la política de calidad", "5.2", "/sgc/politica"),
+    ("PLANEACION", "Establecer objetivos de calidad medibles", "6.2", "/sgc/politica"),
+    ("PLANEACION", "Identificar riesgos y oportunidades", "6.1", "/sgc/riesgos"),
+    ("PLANEACION", "Mapear los procesos (SIPOC)", "4.4", "/sgc/procesos"),
+    ("DOCUMENTACION", "Generar la documentación con plantillas", "7.5", "/sgc/plantillas"),
+    ("DOCUMENTACION", "Definir la lista maestra de registros", "7.5.3", "/sgc/registros"),
+    ("DOCUMENTACION", "Establecer la matriz de comunicación", "7.4", "/sgc/comunicacion"),
+    ("IMPLEMENTACION", "Capacitar al personal y evaluar competencias", "7.2", "/sgc/competencias"),
+    ("IMPLEMENTACION", "Avanzar el tablero de implementación", "8.1", "/sgc/implementacion"),
+    ("IMPLEMENTACION", "Controlar equipos y calibraciones", "7.1.5", "/sgc/equipos"),
+    ("MEDICION", "Definir y medir indicadores KPI", "9.1", "/sgc/kpis"),
+    ("MEDICION", "Medir la satisfacción del cliente", "9.1.2", "/sgc/quejas"),
+    ("MEDICION", "Evaluar a los proveedores", "8.4", "/sgc/evaluacion-proveedores"),
+    ("AUDITORIA_INTERNA", "Crear el programa anual de auditorías", "9.2", "/sgc/programa-auditorias"),
+    ("AUDITORIA_INTERNA", "Ejecutar la auditoría interna", "9.2", "/sgc/auditorias"),
+    ("AUDITORIA_INTERNA", "Levantar y cerrar no conformidades", "10.2", "/sgc/no-conformidades"),
+    ("REVISION_DIRECCION", "Realizar la revisión por la dirección", "9.3", "/sgc/revision-direccion"),
+    ("PREAUDITORIA", "Verificar el checklist de auditoría (modo auditor)", "9.2", "/sgc/auditor"),
+    ("PREAUDITORIA", "Cerrar acciones correctivas pendientes", "10.2", "/sgc/no-conformidades"),
+    ("CERTIFICACION", "Seleccionar organismo certificador", "-", ""),
+    ("CERTIFICACION", "Aprobar la auditoría de certificación", "-", ""),
+]
+
+
+# ── Generación de Word profesional (docx) ────────────────────────────────────
+_DOCX_INDIGO = (0x4F, 0x46, 0xE5)
+_DOCX_DARK = (0x1E, 0x29, 0x3B)
+_DOCX_GREY = (0x6B, 0x72, 0x80)
+_DOCX_FILL_HEAD = "4F46E5"   # cabecera fuerte (texto blanco)
+_DOCX_FILL_SOFT = "EEF0FB"   # relleno suave (cabeceras de tabla del cuerpo)
+
+
+def _docx_shade(cell, hexfill):
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), hexfill)
+    tcPr.append(shd)
+
+
+def _docx_set_cell(cell, text, *, bold=False, size=9, color=None, align=None, fill=None):
+    from docx.shared import Pt, RGBColor
+    from docx.enum.table import WD_ALIGN_VERTICAL
+    cell.text = ""
+    p = cell.paragraphs[0]
+    if align is not None:
+        p.alignment = align
+    r = p.add_run("" if text is None else str(text))
+    r.bold = bold
+    r.font.size = Pt(size)
+    if color is not None:
+        r.font.color.rgb = RGBColor(*color)
+    if fill:
+        _docx_shade(cell, fill)
+    try:
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    except Exception:
+        pass
+    return r
+
+
+def _docx_para_rule(p, color="4F46E5", sz=6):
+    """Línea inferior bajo un encabezado (regla de color)."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    pPr = p._p.get_or_add_pPr()
+    pbdr = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), str(sz))
+    bottom.set(qn("w:space"), "3")
+    bottom.set(qn("w:color"), color)
+    pbdr.append(bottom)
+    pPr.append(pbdr)
+
+
+def _docx_field(par, instr):
+    """Inserta un campo de Word (p. ej. PAGE / NUMPAGES) en un párrafo."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    run = par.add_run()
+    b = OxmlElement("w:fldChar"); b.set(qn("w:fldCharType"), "begin")
+    it = OxmlElement("w:instrText"); it.set(qn("xml:space"), "preserve"); it.text = instr
+    e = OxmlElement("w:fldChar"); e.set(qn("w:fldCharType"), "end")
+    run._r.append(b); run._r.append(it); run._r.append(e)
+
+
+def _docx_render_body(doc, texto):
+    """Renderiza el cuerpo (texto con secciones y tablas ASCII) como contenido
+    Word profesional: encabezados con regla, subtítulos, viñetas y tablas con
+    cabecera sombreada y bordes."""
+    import re as _re
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    INDIGO = RGBColor(*_DOCX_INDIGO)
+    DARK = RGBColor(*_DOCX_DARK)
+    lines = texto.split("\n")
+    tbuf: list = []
+
+    def flush():
+        rows = [r for r in tbuf if not _re.match(r"^[\s\-|]+$", r.strip())]
+        tbuf.clear()
+        if not rows:
+            return
+        celdas = [[c.strip() for c in r.strip().strip("|").split("|")] for r in rows]
+        ncol = max(len(c) for c in celdas)
+        t = doc.add_table(rows=len(celdas), cols=ncol)
+        t.style = "Table Grid"
+        for i, fila in enumerate(celdas):
+            for j in range(ncol):
+                cell = t.rows[i].cells[j]
+                if i == 0:
+                    _docx_set_cell(cell, fila[j] if j < len(fila) else "", bold=True,
+                                   size=8.5, color=_DOCX_INDIGO, fill=_DOCX_FILL_SOFT)
+                else:
+                    _docx_set_cell(cell, fila[j] if j < len(fila) else "", size=8.5)
+        doc.add_paragraph("")
+
+    for raw in lines:
+        s = raw.strip()
+        if "|" in s:
+            tbuf.append(raw)
+            continue
+        if tbuf:
+            flush()
+        if not s:
+            continue
+        if _re.match(r"^[═─\-_]{3,}$", s):
+            continue
+        # Sección numerada principal "1. OBJETIVO" → encabezado con regla.
+        if _re.match(r"^\d+\.\s+[A-ZÁÉÍÓÚÑ]", s):
+            h = doc.add_paragraph()
+            r = h.add_run(s); r.bold = True; r.font.size = Pt(12.5); r.font.color.rgb = INDIGO
+            _docx_para_rule(h)
+            continue
+        # Subsección "4.1 ..." → subtítulo en negrita.
+        if _re.match(r"^\d+\.\d+\S*\s+\S", s):
+            h = doc.add_paragraph()
+            r = h.add_run(s); r.bold = True; r.font.size = Pt(10.5); r.font.color.rgb = DARK
+            continue
+        # Título en mayúsculas (formatos/matrices).
+        if _re.match(r"^[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9 ,/()\-]{3,}$", s) and not _re.search(r"[a-záéíóúñ]", s):
+            h = doc.add_paragraph()
+            r = h.add_run(s); r.bold = True; r.font.size = Pt(11); r.font.color.rgb = INDIGO
+            continue
+        # Viñetas y literales.
+        if _re.match(r"^([•\-]|[a-z]\)|\d+\))\s+", s):
+            p = doc.add_paragraph(s, style="List Bullet")
+            continue
+        doc.add_paragraph(s)
+    if tbuf:
+        flush()
+
+
+def _docx_controlado(*, empresa, titulo, subtitulo, codigo, version, fecha,
+                     clasificacion, body, elaboro=" ", reviso=" ", aprobo=" ",
+                     historial=None):
+    """Construye un documento Word controlado (BytesIO) de aspecto profesional:
+    encabezado de control documental, control de cambios, firmas, cuerpo con
+    tablas/encabezados nativos, y encabezado/pie con numeración de página."""
+    from io import BytesIO
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+
+    WHITE = (0xFF, 0xFF, 0xFF)
+    CENTER = WD_ALIGN_PARAGRAPH.CENTER
+    LEFT = WD_ALIGN_PARAGRAPH.LEFT
+    RIGHT = WD_ALIGN_PARAGRAPH.RIGHT
+
+    doc = Document()
+    sec = doc.sections[0]
+    sec.left_margin = Inches(0.9); sec.right_margin = Inches(0.9)
+    sec.top_margin = Inches(0.7); sec.bottom_margin = Inches(0.75)
+    normal = doc.styles["Normal"]
+    normal.font.name = "Calibri"
+    normal.font.size = Pt(10.5)
+
+    # Encabezado de página (código + título).
+    hp = sec.header.paragraphs[0]; hp.text = ""; hp.alignment = RIGHT
+    rr = hp.add_run(f"{codigo}   ·   {titulo}"); rr.font.size = Pt(7.5); rr.font.color.rgb = RGBColor(*_DOCX_GREY)
+
+    # Pie de página (leyenda + numeración).
+    fp = sec.footer.paragraphs[0]; fp.text = ""; fp.alignment = CENTER
+    r = fp.add_run("Documento controlado conforme a ISO 9001:2015 (7.5). Una vez impreso es copia NO controlada.    ")
+    r.font.size = Pt(7); r.font.color.rgb = RGBColor(*_DOCX_GREY)
+    r = fp.add_run("Página "); r.font.size = Pt(7); r.font.color.rgb = RGBColor(*_DOCX_GREY)
+    _docx_field(fp, "PAGE")
+    r = fp.add_run(" de "); r.font.size = Pt(7); r.font.color.rgb = RGBColor(*_DOCX_GREY)
+    _docx_field(fp, "NUMPAGES")
+
+    # ── Bloque de encabezado de control documental ──
+    ht = doc.add_table(rows=4, cols=4); ht.style = "Table Grid"; ht.alignment = WD_TABLE_ALIGNMENT.CENTER
+    a = ht.cell(0, 0).merge(ht.cell(0, 1))
+    _docx_set_cell(a, empresa, bold=True, size=12, color=_DOCX_DARK, align=LEFT)
+    b = ht.cell(0, 2).merge(ht.cell(0, 3))
+    _docx_set_cell(b, "Sistema de Gestión de Calidad · ISO 9001:2015", bold=True, size=8, color=_DOCX_INDIGO, align=RIGHT)
+    tcell = ht.cell(1, 0).merge(ht.cell(1, 1)).merge(ht.cell(1, 2)).merge(ht.cell(1, 3))
+    _docx_set_cell(tcell, (titulo or "").upper(), bold=True, size=16, color=_DOCX_INDIGO, align=CENTER)
+    if subtitulo:
+        sp = tcell.add_paragraph(); sp.alignment = CENTER
+        sr = sp.add_run(subtitulo); sr.italic = True; sr.font.size = Pt(8.5); sr.font.color.rgb = RGBColor(*_DOCX_GREY)
+    for j, l in enumerate(["Código", "Versión", "Fecha de emisión", "Clasificación"]):
+        _docx_set_cell(ht.cell(2, j), l, bold=True, size=8, color=WHITE, align=CENTER, fill=_DOCX_FILL_HEAD)
+    for j, v in enumerate([codigo or "—", version or "1.0", fecha, clasificacion]):
+        _docx_set_cell(ht.cell(3, j), v, size=9, align=CENTER)
+    doc.add_paragraph("")
+
+    # ── Cuerpo del documento ──
+    _docx_render_body(doc, body)
+
+    # ── Control de cambios ──
+    doc.add_paragraph("")
+    h = doc.add_paragraph(); r = h.add_run("CONTROL DE CAMBIOS")
+    r.bold = True; r.font.size = Pt(11); r.font.color.rgb = RGBColor(*_DOCX_INDIGO); _docx_para_rule(h)
+    hist = historial or [(version or "1.0", fecha, "Emisión inicial", elaboro)]
+    ct = doc.add_table(rows=1 + len(hist), cols=4); ct.style = "Table Grid"
+    for j, hh in enumerate(["Versión", "Fecha", "Descripción del cambio", "Autor"]):
+        _docx_set_cell(ct.cell(0, j), hh, bold=True, size=8, color=WHITE, align=CENTER, fill=_DOCX_FILL_HEAD)
+    for i, fila in enumerate(hist, start=1):
+        for j, val in enumerate(fila):
+            _docx_set_cell(ct.cell(i, j), val, size=8.5)
+
+    # ── Firmas de control ──
+    doc.add_paragraph("")
+    h = doc.add_paragraph(); r = h.add_run("APROBACIÓN")
+    r.bold = True; r.font.size = Pt(11); r.font.color.rgb = RGBColor(*_DOCX_INDIGO); _docx_para_rule(h)
+    ft = doc.add_table(rows=3, cols=3); ft.style = "Table Grid"
+    for j, l in enumerate(["Elaboró", "Revisó", "Aprobó"]):
+        _docx_set_cell(ft.cell(0, j), l, bold=True, size=8, color=WHITE, align=CENTER, fill=_DOCX_FILL_HEAD)
+    for j, nm in enumerate([elaboro, reviso, aprobo]):
+        _docx_set_cell(ft.cell(1, j), nm or " ", size=9, align=CENTER)
+    for j in range(3):
+        _docx_set_cell(ft.cell(2, j), "Nombre y firma", size=7.5, color=_DOCX_GREY, align=CENTER)
+
+    bio = BytesIO(); doc.save(bio); bio.seek(0)
+    return bio
+
+
+class PlantillaDocumentoViewSet(viewsets.ModelViewSet):
+    """Biblioteca de plantillas ISO. Incluye globales (empresa null) + propias."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PlantillaDocumentoSerializer
+    filterset_fields = ["categoria", "clausula", "obligatoria"]
+
+    def get_queryset(self):
+        ids = list(_empresas(self.request.user))
+        return PlantillaDocumento.objects.filter(Q(empresa__isnull=True) | Q(empresa_id__in=ids), activa=True)
+
+    @action(detail=True, methods=["post"])
+    def generar_documento(self, request, pk=None):
+        """Genera un Documento controlado real desde la plantilla, sustituyendo
+        los marcadores {{...}} con datos de la empresa."""
+        from datetime import date as _date
+        plantilla = self.get_object()
+        ids = list(_empresas(request.user))
+        emp_id = request.data.get("empresa") or (ids[0] if ids else None)
+        if not emp_id or int(emp_id) not in ids:
+            return Response({"detail": "Empresa inválida."}, status=400)
+        empresa = Empresa.objects.get(id=emp_id)
+        try:
+            from apps.gestion_documental.models import Documento, TipoDocumento
+        except Exception:
+            return Response({"detail": "Módulo documental no disponible."}, status=400)
+
+        nombre_emp = empresa.nombre_comercial or empresa.razon_social or ""
+        contenido = (plantilla.contenido
+                     .replace("{{empresa}}", nombre_emp)
+                     .replace("{{razon_social}}", empresa.razon_social or nombre_emp)
+                     .replace("{{fecha}}", _date.today().strftime("%d/%m/%Y"))
+                     .replace("{{anio}}", str(_date.today().year))
+                     .replace("{{codigo}}", plantilla.codigo or "")
+                     .replace("{{rfc}}", getattr(empresa, "rfc", "") or ""))
+        categoria = plantilla.categoria if plantilla.categoria in (
+            "POLITICA", "MANUAL", "PROCEDIMIENTO", "INSTRUCTIVO", "FORMATO", "PLAN") else "OTRO"
+        tipo = TipoDocumento.objects.filter(empresa=empresa, categoria=categoria).first()
+        if not tipo:
+            prefijos = {"POLITICA": "PL", "MANUAL": "MN", "PROCEDIMIENTO": "PR",
+                        "INSTRUCTIVO": "IT", "FORMATO": "FR", "PLAN": "PN", "OTRO": "DOC"}
+            t_campos = {f.name for f in TipoDocumento._meta.get_fields()}
+            t_datos = dict(empresa=empresa, categoria=categoria, nombre=plantilla.get_categoria_display())
+            if "codigo" in t_campos:
+                t_datos["codigo"] = prefijos.get(categoria, "DOC")
+            tipo = TipoDocumento.objects.create(**t_datos)
+
+        campos = {f.name for f in Documento._meta.get_fields()}
+        datos = dict(empresa=empresa, tipo=tipo, titulo=plantilla.nombre,
+                     descripcion=plantilla.descripcion, estado="BORRADOR")
+        if "contenido" in campos:
+            datos["contenido"] = contenido
+        else:
+            datos["descripcion"] = (plantilla.descripcion + "\n\n" + contenido)[:5000]
+        if "creado_por" in campos:
+            datos["creado_por"] = request.user
+        if plantilla.codigo and "codigo" in campos:
+            base = plantilla.codigo
+            codigo, i = base, 1
+            while Documento.objects.filter(empresa=empresa, codigo=codigo).exists():
+                i += 1
+                codigo = f"{base}-{i}"
+            datos["codigo"] = codigo
+        doc = Documento.objects.create(**datos)
+        return Response({"documento": doc.id, "codigo": getattr(doc, "codigo", ""),
+                         "detail": "Documento generado en borrador."}, status=201)
+
+    @action(detail=True, methods=["get"], url_path="word")
+    def word(self, request, pk=None):
+        """Descarga la plantilla como documento Word (.docx) profesional, con
+        encabezado de control documental, control de cambios, firmas y tablas
+        con bordes nativas."""
+        from datetime import date as _date
+        import re as _re
+        try:
+            from docx import Document  # noqa: F401 — valida disponibilidad de python-docx
+        except Exception:
+            return Response({"detail": "Generación de Word no disponible en el servidor."}, status=400)
+        from django.http import HttpResponse
+
+        plantilla = self.get_object()
+        ids = list(_empresas(request.user))
+        emp_id = request.query_params.get("empresa") or (ids[0] if ids else None)
+        empresa = Empresa.objects.filter(id=emp_id).first() if (emp_id and int(emp_id) in ids) else None
+        nombre_emp = (empresa.nombre_comercial or empresa.razon_social) if empresa else "________________"
+        rfc = getattr(empresa, "rfc", "") if empresa else ""
+        hoy = _date.today()
+        fstr = hoy.strftime("%d/%m/%Y")
+
+        def subst(t):
+            return (t.replace("{{empresa}}", nombre_emp)
+                     .replace("{{razon_social}}", (empresa.razon_social if empresa else nombre_emp))
+                     .replace("{{fecha}}", fstr)
+                     .replace("{{anio}}", str(hoy.year))
+                     .replace("{{codigo}}", plantilla.codigo or "")
+                     .replace("{{rfc}}", rfc or ""))
+
+        contenido = subst(plantilla.contenido or "")
+        m = _re.search(r"Emisi.n inicial[^\n]*\n", contenido)
+        body = contenido[m.end():] if m else contenido
+
+        bio = _docx_controlado(
+            empresa=nombre_emp, titulo=plantilla.nombre or "Documento",
+            subtitulo=f"{plantilla.get_categoria_display()} · ISO 9001:2015 — Cláusula {plantilla.clausula or '—'}",
+            codigo=plantilla.codigo or "—", version="1.0", fecha=fstr, clasificacion="Controlado",
+            body=body, elaboro="Responsable de Calidad", reviso="Responsable de Calidad", aprobo="Dirección General")
+
+        fname = (plantilla.codigo or "documento").replace(" ", "_") + ".docx"
+        resp = HttpResponse(
+            bio.read(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        resp["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return resp
+
+
+class HitoCertificacionViewSet(_Scoped):
+    queryset = HitoCertificacion.objects.select_related("responsable_user")
+    serializer_class = HitoCertificacionSerializer
+    filterset_fields = ["empresa", "fase", "completado"]
+
+    def _scoped_ids(self, request):
+        ids = list(_empresas(request.user))
+        emp = request.query_params.get("empresa")
+        return [int(emp)] if emp and int(emp) in ids else ids
+
+    @action(detail=False, methods=["post"])
+    def generar(self, request):
+        """Crea el roadmap de certificación estándar para la empresa (si no existe)."""
+        ids = list(_empresas(request.user))
+        emp_id = request.data.get("empresa") or (ids[0] if ids else None)
+        if not emp_id or int(emp_id) not in ids:
+            return Response({"detail": "Empresa inválida."}, status=400)
+        if HitoCertificacion.objects.filter(empresa_id=emp_id).exists():
+            return Response({"detail": "El roadmap ya existe.", "creados": 0})
+        for orden, (fase, titulo, clausula, ruta) in enumerate(ROADMAP_BASE):
+            HitoCertificacion.objects.create(
+                empresa_id=emp_id, fase=fase, titulo=titulo, clausula=clausula, ruta=ruta, orden=orden)
+        return Response({"creados": len(ROADMAP_BASE)})
+
+    @action(detail=False, methods=["get"])
+    def progreso(self, request):
+        """Avance del roadmap por fase + siguiente acción recomendada."""
+        ids = self._scoped_ids(request)
+        hitos = list(HitoCertificacion.objects.filter(empresa_id__in=ids).order_by("orden"))
+        fases_def = dict(HitoCertificacion.FASES)
+        orden_fases = [f[0] for f in HitoCertificacion.FASES]
+        fases = {}
+        for h in hitos:
+            g = fases.setdefault(h.fase, {"fase": h.fase, "nombre": fases_def.get(h.fase, h.fase),
+                                          "total": 0, "completados": 0, "hitos": []})
+            g["total"] += 1
+            if h.completado:
+                g["completados"] += 1
+            g["hitos"].append({"id": h.id, "titulo": h.titulo, "clausula": h.clausula,
+                               "ruta": h.ruta, "completado": h.completado})
+        lista = sorted(fases.values(), key=lambda x: orden_fases.index(x["fase"]) if x["fase"] in orden_fases else 99)
+        for g in lista:
+            g["progreso"] = round(g["completados"] / g["total"] * 100, 1) if g["total"] else 0
+        total = len(hitos)
+        hechos = sum(1 for h in hitos if h.completado)
+        siguiente = next(({"titulo": h.titulo, "ruta": h.ruta, "fase": fases_def.get(h.fase, h.fase)}
+                          for h in hitos if not h.completado), None)
+        return Response({
+            "fases": lista, "total": total, "completados": hechos,
+            "progreso": round(hechos / total * 100, 1) if total else 0,
+            "siguiente_accion": siguiente,
+        })
+
+
+class ProgramaAuditoriaViewSet(_Colaborativo):
+    queryset = ProgramaAuditoria.objects.select_related("responsable_user")
+    serializer_class = ProgramaAuditoriaSerializer
+    filterset_fields = ["empresa", "anio", "aprobado"]
+
+
+class PlantillaChecklistViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PlantillaChecklistSerializer
+    filterset_fields = ["norma", "activa"]
+
+    def get_queryset(self):
+        ids = list(_empresas(self.request.user))
+        return PlantillaChecklist.objects.filter(Q(empresa__isnull=True) | Q(empresa_id__in=ids)).prefetch_related("items")
+
+
+class ItemChecklistViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ItemChecklistSerializer
+    filterset_fields = ["checklist"]
+
+    def get_queryset(self):
+        ids = list(_empresas(self.request.user))
+        return ItemChecklist.objects.filter(Q(checklist__empresa__isnull=True) | Q(checklist__empresa_id__in=ids))
+
+
+class RegistroCalidadViewSet(_Colaborativo):
+    queryset = RegistroCalidad.objects.select_related("responsable_user", "proceso_ref")
+    serializer_class = RegistroCalidadSerializer
+    filterset_fields = ["empresa", "soporte", "disposicion", "activo", "responsable_user"]
+
+
+class GestionCambioViewSet(_Colaborativo):
+    queryset = GestionCambio.objects.select_related("responsable_user", "creado_por")
+    serializer_class = GestionCambioSerializer
+    filterset_fields = ["empresa", "estado", "responsable_user", "tipo", "prioridad"]
+
+
+class ComunicacionSGCViewSet(_Colaborativo):
+    queryset = ComunicacionSGC.objects.select_related("responsable_user")
+    serializer_class = ComunicacionSGCSerializer
+    filterset_fields = ["empresa", "direccion", "activo", "responsable_user"]
+
+
+class ConocimientoOrganizacionalViewSet(_Scoped):
+    queryset = ConocimientoOrganizacional.objects.select_related("autor_user")
+    serializer_class = ConocimientoOrganizacionalSerializer
+    filterset_fields = ["empresa", "tipo"]
+    search_fields = ["titulo", "contenido", "etiquetas", "area"]
+
+    def perform_create(self, serializer):
+        serializer.save(autor_user=self.request.user)
+
+
+# Procesos, objetivos y riesgos típicos por giro de empresa (onboarding).
+GIROS_SGC = {
+    "manufactura": {
+        "label": "Manufactura / Producción",
+        "procesos": [
+            ("ESTRATEGICO", "Planeación estratégica"), ("CLAVE", "Producción"),
+            ("CLAVE", "Control de calidad"), ("CLAVE", "Compras"),
+            ("APOYO", "Mantenimiento"), ("APOYO", "Recursos humanos")],
+        "objetivos": [("Reducir el % de producto no conforme", "≤ 2%"),
+                      ("Cumplir el programa de producción", "≥ 95%"),
+                      ("Mantener la satisfacción del cliente", "≥ 90%")],
+        "riesgos": [("Falla de equipo crítico en producción", 3, 4),
+                    ("Desabasto de materia prima", 3, 4),
+                    ("Producto fuera de especificación", 2, 5)],
+    },
+    "servicios": {
+        "label": "Servicios",
+        "procesos": [
+            ("ESTRATEGICO", "Dirección"), ("CLAVE", "Prestación del servicio"),
+            ("CLAVE", "Atención al cliente"), ("CLAVE", "Ventas"),
+            ("APOYO", "Recursos humanos"), ("APOYO", "Tecnología")],
+        "objetivos": [("Mejorar el tiempo de respuesta al cliente", "≤ 24 h"),
+                      ("Aumentar la satisfacción del cliente (CSAT)", "≥ 90%"),
+                      ("Reducir quejas recurrentes", "≤ 5/mes")],
+        "riesgos": [("Insatisfacción del cliente por demoras", 3, 4),
+                    ("Rotación de personal clave", 3, 3),
+                    ("Incumplimiento de acuerdos de servicio (SLA)", 2, 4)],
+    },
+    "comercio": {
+        "label": "Comercio / Distribución",
+        "procesos": [
+            ("ESTRATEGICO", "Dirección comercial"), ("CLAVE", "Compras"),
+            ("CLAVE", "Almacén y distribución"), ("CLAVE", "Ventas"),
+            ("APOYO", "Administración"), ("APOYO", "Recursos humanos")],
+        "objetivos": [("Cumplir las entregas a tiempo", "≥ 95%"),
+                      ("Reducir faltantes de inventario", "≤ 3%"),
+                      ("Aumentar la satisfacción del cliente", "≥ 90%")],
+        "riesgos": [("Entregas fuera de tiempo", 3, 4),
+                    ("Diferencias de inventario", 3, 3),
+                    ("Proveedores no confiables", 2, 4)],
+    },
+    "transporte": {
+        "label": "Transporte / Logística",
+        "procesos": [
+            ("ESTRATEGICO", "Dirección"), ("CLAVE", "Operación de transporte"),
+            ("CLAVE", "Mantenimiento de flota"), ("CLAVE", "Atención al cliente"),
+            ("APOYO", "Recursos humanos"), ("APOYO", "Compras")],
+        "objetivos": [("Cumplir las entregas a tiempo", "≥ 95%"),
+                      ("Reducir incidentes/accidentes", "0 graves"),
+                      ("Disponibilidad de la flota", "≥ 90%")],
+        "riesgos": [("Accidente de unidad", 2, 5),
+                    ("Retraso en entregas", 3, 4),
+                    ("Falla mecánica de flota", 3, 3)],
+    },
+    "general": {
+        "label": "General / Otro",
+        "procesos": [
+            ("ESTRATEGICO", "Dirección"), ("CLAVE", "Operación principal"),
+            ("CLAVE", "Atención al cliente"), ("APOYO", "Compras"),
+            ("APOYO", "Recursos humanos")],
+        "objetivos": [("Aumentar la satisfacción del cliente", "≥ 90%"),
+                      ("Cumplir los objetivos operativos", "≥ 95%"),
+                      ("Reducir no conformidades", "tendencia a la baja")],
+        "riesgos": [("Insatisfacción del cliente", 3, 4),
+                    ("Incumplimiento de requisitos legales", 2, 5),
+                    ("Falta de competencia del personal", 2, 3)],
+    },
+}
+
+
+class OnboardingSGCViewSet(viewsets.ViewSet):
+    """Asistente de alta del SGC: genera la base (procesos, objetivos, riesgos,
+    roadmap) según el giro, para que una empresa nueva arranque en minutos."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=["get"])
+    def giros(self, request):
+        return Response([{"id": k, "label": v["label"]} for k, v in GIROS_SGC.items()])
+
+    @action(detail=False, methods=["get"])
+    def estado(self, request):
+        """Indica si la empresa ya tiene contenido del SGC."""
+        ids = list(_empresas(request.user))
+        emp = request.query_params.get("empresa")
+        emp_id = int(emp) if emp and int(emp) in ids else (ids[0] if ids else None)
+        if not emp_id:
+            return Response({"detail": "Empresa inválida."}, status=400)
+        return Response({
+            "procesos": Proceso.objects.filter(empresa_id=emp_id).count(),
+            "objetivos": ObjetivoCalidad.objects.filter(empresa_id=emp_id).count(),
+            "riesgos": Riesgo.objects.filter(empresa_id=emp_id).count(),
+            "roadmap": HitoCertificacion.objects.filter(empresa_id=emp_id).count(),
+            "diagnostico": EvaluacionRequisito.objects.filter(empresa_id=emp_id).count(),
+        })
+
+    @action(detail=False, methods=["post"])
+    def generar(self, request):
+        """Crea procesos SIPOC, objetivos, riesgos y roadmap base según el giro.
+        No duplica lo que ya exista."""
+        ids = list(_empresas(request.user))
+        emp_id = request.data.get("empresa") or (ids[0] if ids else None)
+        if not emp_id or int(emp_id) not in ids:
+            return Response({"detail": "Empresa inválida."}, status=400)
+        giro = request.data.get("giro", "general")
+        cfg = GIROS_SGC.get(giro, GIROS_SGC["general"])
+        from datetime import date as _date, timedelta as _td
+        res = {"procesos": 0, "objetivos": 0, "riesgos": 0, "roadmap": 0}
+
+        for i, (tipo, nombre) in enumerate(cfg["procesos"]):
+            obj, created = Proceso.objects.get_or_create(
+                empresa_id=emp_id, nombre=nombre,
+                defaults={"tipo": tipo, "codigo": f"P-{i + 1:02d}"})
+            if created:
+                res["procesos"] += 1
+
+        for objetivo, meta in cfg["objetivos"]:
+            _, created = ObjetivoCalidad.objects.get_or_create(
+                empresa_id=emp_id, objetivo=objetivo,
+                defaults={"meta": meta, "estado": "EN_CURSO",
+                          "fecha_limite": _date.today() + _td(days=365)})
+            if created:
+                res["objetivos"] += 1
+
+        for descripcion, prob, imp in cfg["riesgos"]:
+            _, created = Riesgo.objects.get_or_create(
+                empresa_id=emp_id, descripcion=descripcion,
+                defaults={"probabilidad": prob, "impacto": imp, "estado": "IDENTIFICADO"})
+            if created:
+                res["riesgos"] += 1
+
+        if not HitoCertificacion.objects.filter(empresa_id=emp_id).exists():
+            for orden, (fase, titulo, clausula, ruta) in enumerate(ROADMAP_BASE):
+                HitoCertificacion.objects.create(
+                    empresa_id=emp_id, fase=fase, titulo=titulo, clausula=clausula,
+                    ruta=ruta, orden=orden)
+            res["roadmap"] = len(ROADMAP_BASE)
+
+        return Response({"giro": cfg["label"], "creados": res})

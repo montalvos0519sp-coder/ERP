@@ -7,6 +7,8 @@ import {
   FileText, Calendar, Clock, Package, Download, Save, Copy, Check,
   Route, User, Building2, Hash, Weight, Box, Flag, Navigation,
   Activity, ChevronDown, Edit3, Ban, Wallet, Pencil,
+  GripVertical, ShieldCheck, Stamp, FileCheck, XCircle,
+  Receipt, Paperclip,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import SatCombobox from "@/components/SatCombobox";
@@ -14,7 +16,15 @@ import Combobox from "@/components/Combobox";
 
 interface Lugar  { id: number; nombre: string; id_ubicacion?: string; codigo_postal?: string; direccion?: string; }
 interface Parada { id: number; orden: number; lugar_id: number; id_ubicacion: string; destino: string; direccion: string; codigo_postal: string; fecha_hora: string; kms: string; observaciones?: string; }
-interface Mercancia { id: number; parada_origen_id?: number | null; parada_destino_id?: number | null; origen_codigo?: string; destino_codigo?: string; clave_producto: string; descripcion: string; cantidad: string; peso_kg: string; unidad_medida: string; material_peligroso: boolean; notas?: string; }
+interface Mercancia { id: number; parada_origen_id?: number | null; parada_destino_id?: number | null; origen_codigo?: string; destino_codigo?: string; clave_producto: string; descripcion: string; cantidad: string; peso_kg: string; unidad_medida: string; material_peligroso: boolean; clave_material_peligroso?: string; embalaje?: string; descripcion_embalaje?: string; notas?: string; }
+interface Determinante { id: number; codigo: string; nombre: string; cliente?: string; ubicacion?: number | null; ubicacion_nombre?: string; activo?: boolean; }
+interface Timbre { id: number; uuid: string; estado: string; fecha: string; motivo_cancelacion?: string; }
+interface CategoriaGasto { id: number; nombre: string; descripcion?: string; activo?: boolean; }
+interface EvidenciaGasto { id: number; nombre: string; mime: string; archivo_url: string; es_imagen: boolean; subido?: string; }
+interface GastoViaje {
+  id: number; viaje: number; categoria: number | null; categoria_nombre: string | null;
+  descripcion: string; monto: string; fecha: string | null; evidencias: EvidenciaGasto[]; creado?: string;
+}
 interface Viaje {
   id: number; numero_viaje?: number; id_viaje: string; folio_carta?: string; folio_carga: string; fecha_viaje: string;
   operador: string; operador_id: string; unidad: string; unidad_id: number;
@@ -28,6 +38,17 @@ interface Viaje {
   observaciones: string; paradas: Parada[]; mercancias: Mercancia[];
   operador_data?: { rfc?: string; numero_licencia?: string; licencia_vencimiento?: string; licencia_fuente?: string };
   unidad_data?: any;
+  empresa?: number | string;
+  empresa_id?: number | string;
+  carta_porte_estado?: string;
+  carta_porte_uuid?: string;
+  timbres?: Timbre[];
+  gastos?: GastoViaje[];
+  total_gastos?: string;
+}
+
+function fmtMXN(x: unknown) {
+  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(x || 0));
 }
 
 function fmtDateTime(iso: string) {
@@ -45,11 +66,44 @@ export default function ViajeDetalle({ id }: { id: string }) {
   const [busyParada, setBusyParada] = useState(false);
   const [busyMerc, setBusyMerc] = useState(false);
 
+  // Gastos de viaje
+  const [mostrarModalGasto, setMostrarModalGasto] = useState(false);
+  const [categoriasGasto, setCategoriasGasto] = useState<CategoriaGasto[]>([]);
+  const [nuevoGasto, setNuevoGasto] = useState<{ categoria: string; descripcion: string; monto: string; fecha: string }>({
+    categoria: "", descripcion: "", monto: "", fecha: "",
+  });
+  const [archivosGasto, setArchivosGasto] = useState<File[]>([]);
+  const [mostrarAltaCategoria, setMostrarAltaCategoria] = useState(false);
+  const [nuevaCategoria, setNuevaCategoria] = useState<{ nombre: string; descripcion: string }>({ nombre: "", descripcion: "" });
+  const [busyGasto, setBusyGasto] = useState(false);
+  const [busyCatGasto, setBusyCatGasto] = useState(false);
+
   // Modal nueva parada
   const [openParada, setOpenParada] = useState(false);
   const [pLugarId, setPLugarId] = useState("");
   const [pFechaHora, setPFechaHora] = useState("");
   const [pKms, setPKms] = useState("0");
+  const [pDeterminante, setPDeterminante] = useState("");
+
+  // Determinantes (catálogo)
+  const [determinantes, setDeterminantes] = useState<Determinante[]>([]);
+  const [openDeterminante, setOpenDeterminante] = useState(false);
+  const [dtCodigo, setDtCodigo] = useState("");
+  const [dtNombre, setDtNombre] = useState("");
+  const [dtCliente, setDtCliente] = useState("");
+  const [dtUbicacion, setDtUbicacion] = useState("");
+  const [busyDt, setBusyDt] = useState(false);
+
+  // Drag & drop de paradas (itinerario)
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+
+  // Carta Porte (SAT)
+  const [busyCp, setBusyCp] = useState(false);
+  const [cpError, setCpError] = useState<string | null>(null);
+  const [cpAviso, setCpAviso] = useState<string | null>(null);
+  const [cpMotivo, setCpMotivo] = useState("02");
+  const [cpUuidCopied, setCpUuidCopied] = useState(false);
 
   // Modal nueva mercancía / edición (mId !== null indica edición)
   const [openMerc, setOpenMerc] = useState(false);
@@ -60,6 +114,9 @@ export default function ViajeDetalle({ id }: { id: string }) {
   const [mPeso, setMPeso] = useState("0");
   const [mUM, setMUM] = useState("H87");
   const [mPel, setMPel] = useState(false);
+  const [mClaveMP, setMClaveMP] = useState("");
+  const [mEmbalaje, setMEmbalaje] = useState("");
+  const [mDescEmbalaje, setMDescEmbalaje] = useState("");
   const [mPOrigen, setMPOrigen] = useState("");
   const [mPDestino, setMPDestino] = useState("");
 
@@ -86,6 +143,7 @@ export default function ViajeDetalle({ id }: { id: string }) {
 
   // Edición rápida de tarjetas (Operador licencia / Unidad / SCT)
   const [openEditOp, setOpenEditOp] = useState(false);
+  const [edOpRfc, setEdOpRfc] = useState("");
   const [edOpNumLic, setEdOpNumLic] = useState("");
   const [edOpFExp, setEdOpFExp] = useState("");
   const [edOpFVenc, setEdOpFVenc] = useState("");
@@ -125,6 +183,7 @@ export default function ViajeDetalle({ id }: { id: string }) {
   const [edPais, setEdPais] = useState("México");
   const [edFechaHora, setEdFechaHora] = useState("");
   const [edKms, setEdKms] = useState("0");
+  const [edDeterminante, setEdDeterminante] = useState("");
   const [edColonias, setEdColonias] = useState<string[]>([]);
   const [busyEditParada, setBusyEditParada] = useState(false);
 
@@ -145,6 +204,17 @@ export default function ViajeDetalle({ id }: { id: string }) {
   };
 
   useEffect(() => { load(); }, [id]);
+
+  const cargarDeterminantes = async () => {
+    try {
+      const empresa = (v as any)?.empresa ?? (v as any)?.empresa_id;
+      const params = empresa ? { empresa: String(empresa) } : undefined;
+      const r = await api.getDeterminantes(params) as any;
+      setDeterminantes(Array.isArray(r) ? r : (r?.results ?? []));
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { cargarDeterminantes(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [v?.id]);
 
   const kmsTotales = useMemo(() => {
     if (!v) return 0;
@@ -186,9 +256,10 @@ export default function ViajeDetalle({ id }: { id: string }) {
         lugar_id: Number(pLugarId),
         fecha_hora: pFechaHora || null,
         kms: pKms || 0,
-      });
+        ...(pDeterminante ? { determinante: Number(pDeterminante) } : {}),
+      } as any);
       setOpenParada(false);
-      setPLugarId(""); setPFechaHora(""); setPKms("0");
+      setPLugarId(""); setPFechaHora(""); setPKms("0"); setPDeterminante("");
       await load();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "Error agregando parada");
@@ -197,13 +268,115 @@ export default function ViajeDetalle({ id }: { id: string }) {
 
   const eliminarParada = async (pid: number) => {
     if (!confirm("¿Eliminar esta parada?")) return;
-    await api.eliminarParadaViaje(pid);
+    await api.eliminarParadaViaje(id, pid);
     await load();
+  };
+
+  // Reordenar paradas (drag & drop)
+  const soltarParada = async (destinoIdx: number) => {
+    const origenIdx = dragIdx;
+    setDragIdx(null);
+    setOverIdx(null);
+    if (!v || origenIdx === null || origenIdx === destinoIdx) return;
+    const nuevas = [...v.paradas];
+    const [movida] = nuevas.splice(origenIdx, 1);
+    nuevas.splice(destinoIdx, 0, movida);
+    // Optimista
+    setV(prev => prev ? ({ ...prev, paradas: nuevas }) : prev);
+    const ordenIds = nuevas.map(p => p.id);
+    try {
+      await api.reordenarParadasViaje(v.id, ordenIds);
+      await load();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "No se pudo reordenar el itinerario");
+      await load();
+    }
+  };
+
+  // Alta de determinante
+  const crearDeterminante = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dtCodigo.trim() || !dtNombre.trim()) return;
+    setBusyDt(true);
+    try {
+      await api.crearDeterminante({
+        codigo: dtCodigo.trim(),
+        nombre: dtNombre.trim(),
+        cliente: dtCliente.trim() || null,
+        ubicacion: dtUbicacion ? Number(dtUbicacion) : null,
+      });
+      setOpenDeterminante(false);
+      setDtCodigo(""); setDtNombre(""); setDtCliente(""); setDtUbicacion("");
+      await cargarDeterminantes();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Error creando determinante");
+    } finally { setBusyDt(false); }
+  };
+
+  // Carta Porte (SAT)
+  const timbrarCP = async () => {
+    if (!v) return;
+    setBusyCp(true); setCpError(null); setCpAviso(null);
+    try {
+      const r = await api.timbrarCartaPorte(v.id) as any;
+      const uuid = r?.carta_porte_uuid || "";
+      setCpAviso(`Carta Porte timbrada correctamente ante el SAT.${uuid ? ` UUID: ${uuid}` : ""}`);
+      await load();
+    } catch (e: unknown) {
+      setCpError(e instanceof Error ? e.message : "No se pudo timbrar la Carta Porte");
+    } finally { setBusyCp(false); }
+  };
+
+  const reactivarCP = async () => {
+    if (!v) return;
+    setBusyCp(true); setCpError(null); setCpAviso(null);
+    try {
+      const r = await api.reactivarCartaPorte(v.id) as any;
+      const uuid = r?.carta_porte_uuid || "";
+      setCpAviso(`Carta Porte re-timbrada (nuevo folio fiscal).${uuid ? ` UUID: ${uuid}` : ""}`);
+      await load();
+    } catch (e: unknown) {
+      setCpError(e instanceof Error ? e.message : "No se pudo volver a timbrar la Carta Porte");
+    } finally { setBusyCp(false); }
+  };
+
+  const cancelarCP = async () => {
+    if (!v) return;
+    setBusyCp(true); setCpError(null); setCpAviso(null);
+    try {
+      await api.cancelarCartaPorte(v.id, cpMotivo);
+      setCpAviso("Carta Porte cancelada ante el SAT.");
+      await load();
+    } catch (e: unknown) {
+      setCpError(e instanceof Error ? e.message : "No se pudo cancelar la Carta Porte");
+    } finally { setBusyCp(false); }
+  };
+
+  const descargarViajePdf = async () => {
+    if (!v) return;
+    try { await api.descargarViajePdf(v.id); } catch (e) { alert(e instanceof Error ? e.message : "No se pudo abrir el PDF"); }
+  };
+  const descargarCpXml = async () => {
+    if (!v) return;
+    try { await api.descargarCartaPorteXml(v.id); } catch (e) { alert(e instanceof Error ? e.message : "No se pudo descargar el XML"); }
+  };
+  const descargarCpPdf = async () => {
+    if (!v) return;
+    try { await api.descargarCartaPortePdf(v.id); } catch (e) { alert(e instanceof Error ? e.message : "No se pudo descargar el PDF"); }
+  };
+
+  const copiarUuidCp = () => {
+    if (!v?.carta_porte_uuid) return;
+    navigator.clipboard.writeText(v.carta_porte_uuid).then(() => {
+      setCpUuidCopied(true);
+      setTimeout(() => setCpUuidCopied(false), 1500);
+    });
   };
 
   const resetMercForm = () => {
     setMId(null);
     setMClave(""); setMDesc(""); setMCant("1"); setMPeso("0"); setMUM("H87"); setMPel(false);
+    setMClaveMP(""); setMEmbalaje(""); setMDescEmbalaje("");
     setMPOrigen(""); setMPDestino("");
   };
 
@@ -218,6 +391,7 @@ export default function ViajeDetalle({ id }: { id: string }) {
     setMPeso("0");
     setMUM("32");
     setMPel(false);
+    setMClaveMP(""); setMEmbalaje(""); setMDescEmbalaje("");
     if (v && v.paradas.length > 0) {
       setMPOrigen(String(v.paradas[0].id));
       setMPDestino(String(v.paradas[v.paradas.length - 1].id));
@@ -235,6 +409,9 @@ export default function ViajeDetalle({ id }: { id: string }) {
     setMPeso(String(m.peso_kg ?? "0"));
     setMUM(m.unidad_medida || "H87");
     setMPel(!!m.material_peligroso);
+    setMClaveMP(m.clave_material_peligroso || "");
+    setMEmbalaje(m.embalaje || "");
+    setMDescEmbalaje(m.descripcion_embalaje || "");
     setMPOrigen(m.parada_origen_id ? String(m.parada_origen_id) : "");
     setMPDestino(m.parada_destino_id ? String(m.parada_destino_id) : "");
     setOpenMerc(true);
@@ -252,11 +429,14 @@ export default function ViajeDetalle({ id }: { id: string }) {
         peso_kg: mPeso || 0,
         unidad_medida: mUM,
         material_peligroso: mPel,
+        clave_material_peligroso: mPel ? (mClaveMP.trim() || null) : null,
+        embalaje: mPel ? (mEmbalaje.trim() || null) : null,
+        descripcion_embalaje: mPel ? (mDescEmbalaje.trim() || null) : null,
         parada_origen_id: mPOrigen ? Number(mPOrigen) : null,
         parada_destino_id: mPDestino ? Number(mPDestino) : null,
       };
       if (mId !== null) {
-        await api.actualizarMercanciaViaje(mId, payload);
+        await api.actualizarMercanciaViaje(id, mId, payload);
       } else {
         await api.agregarMercanciaViaje(id, payload);
       }
@@ -270,8 +450,102 @@ export default function ViajeDetalle({ id }: { id: string }) {
 
   const eliminarMercancia = async (mid: number) => {
     if (!confirm("¿Eliminar esta mercancía?")) return;
-    await api.eliminarMercanciaViaje(mid);
+    await api.eliminarMercanciaViaje(id, mid);
     await load();
+  };
+
+  // ── Gastos de viaje ──────────────────────────────────────────────
+  const cargarCategoriasGasto = async () => {
+    try {
+      const res = await api.getCategoriasGasto() as any;
+      const lista = (res?.results ?? res) as CategoriaGasto[];
+      setCategoriasGasto(Array.isArray(lista) ? lista : []);
+    } catch { /* ignore */ }
+  };
+
+  const abrirModalGasto = () => {
+    setNuevoGasto({ categoria: "", descripcion: "", monto: "", fecha: "" });
+    setArchivosGasto([]);
+    setMostrarAltaCategoria(false);
+    setNuevaCategoria({ nombre: "", descripcion: "" });
+    cargarCategoriasGasto();
+    setMostrarModalGasto(true);
+  };
+
+  const crearCategoriaGastoInline = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nuevaCategoria.nombre.trim()) return;
+    setBusyCatGasto(true);
+    try {
+      const creada = await api.crearCategoriaGasto({
+        nombre: nuevaCategoria.nombre.trim(),
+        descripcion: nuevaCategoria.descripcion.trim(),
+      }) as CategoriaGasto;
+      await cargarCategoriasGasto();
+      if (creada?.id) setNuevoGasto(prev => ({ ...prev, categoria: String(creada.id) }));
+      setNuevaCategoria({ nombre: "", descripcion: "" });
+      setMostrarAltaCategoria(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error creando categoría");
+    } finally { setBusyCatGasto(false); }
+  };
+
+  const guardarGasto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!v) return;
+    if (!nuevoGasto.monto || Number(nuevoGasto.monto) < 0) {
+      alert("Ingresa un monto válido (≥ 0).");
+      return;
+    }
+    setBusyGasto(true);
+    try {
+      const gasto = await api.crearGastoViaje({
+        viaje: v.id,
+        categoria: nuevoGasto.categoria ? Number(nuevoGasto.categoria) : null,
+        descripcion: nuevoGasto.descripcion.trim(),
+        monto: nuevoGasto.monto,
+        fecha: nuevoGasto.fecha || null,
+      }) as GastoViaje;
+      for (const file of archivosGasto) {
+        await api.subirEvidenciaGasto(gasto.id, file);
+      }
+      setMostrarModalGasto(false);
+      setNuevoGasto({ categoria: "", descripcion: "", monto: "", fecha: "" });
+      setArchivosGasto([]);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error guardando el gasto");
+    } finally { setBusyGasto(false); }
+  };
+
+  const eliminarGasto = async (gid: number) => {
+    if (!confirm("¿Eliminar este gasto?")) return;
+    try {
+      await api.eliminarGastoViaje(gid);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error eliminando el gasto");
+    }
+  };
+
+  const subirEvidencia = async (gastoId: number, file: File | null | undefined) => {
+    if (!file) return;
+    try {
+      await api.subirEvidenciaGasto(gastoId, file);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error subiendo la evidencia");
+    }
+  };
+
+  const eliminarEvidencia = async (gastoId: number, evId: number) => {
+    if (!confirm("¿Eliminar esta evidencia?")) return;
+    try {
+      await api.eliminarEvidenciaGasto(gastoId, evId);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error eliminando la evidencia");
+    }
   };
 
   const abrirEdicion = async () => {
@@ -345,6 +619,7 @@ export default function ViajeDetalle({ id }: { id: string }) {
     setEdPais((p as any).pais || "México");
     setEdFechaHora(p.fecha_hora ? p.fecha_hora.slice(0, 16) : "");
     setEdKms(String(p.kms || "0"));
+    setEdDeterminante((p as any).determinante ? String((p as any).determinante) : "");
     setEdColonias([]);
     setOpenEditParada(true);
   };
@@ -353,14 +628,15 @@ export default function ViajeDetalle({ id }: { id: string }) {
   useEffect(() => {
     if (!openEditParada) return;
     const cp = edCP.trim();
-    if (!/^\d{4,5}$/.test(cp)) { setEdColonias([]); return; }
+    if (!/^\d{5}$/.test(cp)) { setEdColonias([]); return; }
     const t = setTimeout(async () => {
       try {
         const r = await api.buscarCP(cp) as any;
         if (r.found) {
-          if (r.estado && !edEstado) setEdEstado(r.estado);
-          if (r.municipio && !edMunicipio) setEdMunicipio(r.municipio);
-          setEdColonias((r.colonias || []).map((c: any) => c.nombre));
+          if (r.estado) setEdEstado(r.estado);
+          if (r.municipio) setEdMunicipio(r.municipio);
+          // lookup/ devuelve colonias como lista de strings.
+          setEdColonias((r.colonias || []).map((c: any) => (typeof c === "string" ? c : c?.nombre)).filter(Boolean));
         }
       } catch {}
     }, 300);
@@ -386,10 +662,11 @@ export default function ViajeDetalle({ id }: { id: string }) {
         pais: edPais.trim() || "México",
       });
       // 2) Actualizar Parada (fecha_hora, kms, observaciones)
-      await api.actualizarParadaViaje(editParadaId, {
+      await api.actualizarParadaViaje(id, editParadaId, {
         fecha_hora: edFechaHora || null,
         kms: edKms || 0,
-      });
+        determinante: edDeterminante ? Number(edDeterminante) : null,
+      } as any);
       setOpenEditParada(false);
       await load();
     } catch (e: unknown) {
@@ -439,10 +716,10 @@ export default function ViajeDetalle({ id }: { id: string }) {
             <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{v.id_viaje}</span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <a href={api.getViajePdfUrl(v.id)} target="_blank" rel="noopener noreferrer"
+            <button onClick={descargarViajePdf}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500 shadow-md shadow-blue-900/20 transition-all">
               <Download size={13} /> Carta de Traslado · PDF
-            </a>
+            </button>
             <button onClick={() => {
                 setEdSueldoValor(v.sueldo_operador ? String(v.sueldo_operador) : "0");
                 setOpenEditSueldo(true);
@@ -546,6 +823,7 @@ export default function ViajeDetalle({ id }: { id: string }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <InfoCard icon={User}     title="Operador" tone="violet"
             onEdit={() => {
+              setEdOpRfc(v.operador_data?.rfc || "");
               setEdOpNumLic(v.operador_data?.numero_licencia || "");
               setEdOpFExp("");
               setEdOpFVenc(v.operador_data?.licencia_vencimiento ? v.operador_data.licencia_vencimiento.slice(0, 10) : "");
@@ -613,6 +891,9 @@ export default function ViajeDetalle({ id }: { id: string }) {
               <button onClick={load} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
                 <RefreshCw size={11} /> Recargar
               </button>
+              <button onClick={() => setOpenDeterminante(true)} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg border border-indigo-200 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-colors">
+                <Plus size={11} /> Determinante
+              </button>
               <button onClick={() => setOpenParada(true)} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-500 shadow-sm transition-colors">
                 <Plus size={11} /> Agregar parada
               </button>
@@ -624,6 +905,12 @@ export default function ViajeDetalle({ id }: { id: string }) {
             {v.paradas.length === 0 ? (
               <div className="text-center py-10 text-sm text-slate-400 italic">Sin paradas en el itinerario</div>
             ) : (
+              <>
+              {v.paradas.length > 1 && (
+                <p className="text-[11px] text-slate-400 mb-3 flex items-center gap-1.5">
+                  <GripVertical size={12} /> Arrastra para reordenar
+                </p>
+              )}
               <ol className="relative">
                 {/* línea vertical */}
                 <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-emerald-400 via-blue-400 to-rose-400 dark:from-emerald-500 dark:via-blue-500 dark:to-rose-500" />
@@ -636,13 +923,25 @@ export default function ViajeDetalle({ id }: { id: string }) {
                       ? "bg-rose-500 ring-rose-200 dark:ring-rose-900/40"
                       : "bg-blue-500 ring-blue-200 dark:ring-blue-900/40";
                   return (
-                    <li key={p.id} className="relative pl-12 pb-4 last:pb-0 group">
+                    <li
+                      key={p.id}
+                      draggable
+                      onDragStart={() => setDragIdx(i)}
+                      onDragOver={e => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); }}
+                      onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+                      onDrop={e => { e.preventDefault(); soltarParada(i); }}
+                      className={`relative pl-12 pb-4 last:pb-0 group cursor-move ${
+                        dragIdx === i ? "opacity-50" : ""
+                      } ${overIdx === i && dragIdx !== null && dragIdx !== i ? "ring-2 ring-blue-400 rounded-xl" : ""}`}
+                    >
                       {/* Dot */}
                       <span className={`absolute left-3 top-1.5 w-4 h-4 rounded-full ring-4 ${dotCls} z-10`}>
                         {(isFirst || isLast) && <Flag size={8} className="text-white absolute inset-0 m-auto" />}
                       </span>
                       {/* Card */}
                       <div className="bg-slate-50/80 dark:bg-slate-800/50 rounded-xl border border-slate-200/70 dark:border-slate-800 p-3 hover:border-blue-300 dark:hover:border-blue-700 transition-colors">
+                        {/* Agarre de arrastre */}
+                        <GripVertical size={14} className="absolute right-2 top-2 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                         <div className="flex items-start justify-between gap-3 flex-wrap">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -661,6 +960,14 @@ export default function ViajeDetalle({ id }: { id: string }) {
                             </div>
                             <h4 className="text-sm font-black text-slate-800 dark:text-white mt-1">{p.destino}</h4>
                             {p.direccion && <p className="text-[11.5px] text-slate-500 mt-0.5">{p.direccion}</p>}
+                            {(p as any).determinante && (() => {
+                              const det = determinantes.find(d => d.id === (p as any).determinante);
+                              return (
+                                <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-200 dark:ring-indigo-900/40">
+                                  <Hash size={9} /> Det. {det ? `${det.codigo} · ${det.nombre}` : (p as any).determinante}
+                                </span>
+                              );
+                            })()}
                           </div>
                           <div className="flex items-start gap-3">
                             <div className="text-right">
@@ -695,6 +1002,7 @@ export default function ViajeDetalle({ id }: { id: string }) {
                   );
                 })}
               </ol>
+              </>
             )}
           </div>
 
@@ -823,6 +1131,255 @@ export default function ViajeDetalle({ id }: { id: string }) {
           )}
         </section>
 
+        {/* ── Gastos de viaje ─────────────────────────────────────────── */}
+        <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 flex-wrap gap-3">
+            <div>
+              <h2 className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
+                <Receipt size={16} className="text-emerald-500" /> Gastos de viaje
+              </h2>
+              <p className="text-[11.5px] text-slate-500 mt-0.5">
+                {(v.gastos?.length ?? 0)} gasto{(v.gastos?.length ?? 0) !== 1 ? "s" : ""} registrado{(v.gastos?.length ?? 0) !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="text-right">
+                <div className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400">Total gastos</div>
+                <div className="text-lg font-black text-emerald-700 dark:text-emerald-300 font-mono tabular-nums">{fmtMXN(v.total_gastos)}</div>
+              </div>
+              <button onClick={abrirModalGasto} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm transition-colors">
+                <Plus size={11} /> Agregar gasto
+              </button>
+            </div>
+          </div>
+
+          {(v.gastos?.length ?? 0) === 0 ? (
+            <div className="p-12 text-center">
+              <Receipt size={32} className="mx-auto text-slate-300 dark:text-slate-700 mb-3" />
+              <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Aún no hay gastos registrados para este viaje.</p>
+              <button onClick={abrirModalGasto} className="inline-flex items-center gap-1.5 mt-3 px-4 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors">
+                <Plus size={11} /> Agregar gasto
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-800">
+                  <tr>
+                    {["Categoría", "Descripción", "Fecha", "Monto", "Evidencias", ""].map(h => (
+                      <th key={h} className="px-3 py-2.5 text-left text-[10px] font-extrabold text-slate-500 uppercase tracking-[0.15em]">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                  {(v.gastos ?? []).map(g => (
+                    <tr key={g.id} className="hover:bg-emerald-50/30 dark:hover:bg-emerald-950/10 transition-colors group align-top">
+                      <td className="px-3 py-3">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {g.categoria_nombre || "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="text-[12.5px] font-semibold text-slate-700 dark:text-slate-200">{g.descripcion || "—"}</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="text-[12px] text-slate-600 dark:text-slate-400 tabular-nums">{g.fecha || "—"}</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="font-mono text-[13px] font-black tabular-nums text-emerald-700 dark:text-emerald-300">{fmtMXN(g.monto)}</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {(g.evidencias ?? []).map(ev => (
+                            <div key={ev.id} className="relative group/ev">
+                              {ev.es_imagen ? (
+                                <img
+                                  src={ev.archivo_url}
+                                  alt={ev.nombre}
+                                  onClick={() => window.open(ev.archivo_url, "_blank")}
+                                  className="h-12 w-12 object-cover rounded border border-slate-200 dark:border-slate-700 cursor-pointer hover:opacity-80 transition-opacity"
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(ev.archivo_url, "_blank")}
+                                  title={ev.nombre}
+                                  className="inline-flex items-center gap-1.5 max-w-[160px] px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                                >
+                                  <FileText size={12} className="shrink-0 text-rose-500" />
+                                  <span className="truncate">{ev.nombre}</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => eliminarEvidencia(g.id, ev.id)}
+                                title="Eliminar evidencia"
+                                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center shadow opacity-0 group-hover/ev:opacity-100 transition-opacity"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                          {(g.evidencias?.length ?? 0) === 0 && (
+                            <span className="text-[11px] text-slate-400 italic">Sin evidencias</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <div className="inline-flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                          <label title="Agregar evidencia"
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-white hover:bg-emerald-600 transition-all cursor-pointer">
+                            <Paperclip size={11} />
+                            <input
+                              type="file"
+                              accept="application/pdf,image/*"
+                              className="hidden"
+                              onChange={e => {
+                                const file = e.target.files?.[0];
+                                subirEvidencia(g.id, file);
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                          <button onClick={() => eliminarGasto(g.id)} title="Eliminar gasto"
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-white hover:bg-red-500 transition-all">
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-emerald-50/40 dark:bg-emerald-950/20 border-t-2 border-emerald-200 dark:border-emerald-900/40">
+                  <tr>
+                    <td colSpan={3} className="px-3 py-2.5 text-right text-[11px] font-extrabold uppercase tracking-widest text-slate-500">Total</td>
+                    <td className="px-3 py-2.5 font-mono text-sm font-black text-emerald-700 dark:text-emerald-300 tabular-nums">{fmtMXN(v.total_gastos)}</td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* ── Carta Porte (SAT) ───────────────────────────────────────── */}
+        {(() => {
+          const cpEstado = (v.carta_porte_estado || "BORRADOR").toUpperCase();
+          const cpStyles: Record<string, { bg: string; text: string }> = {
+            BORRADOR:  { bg: "bg-slate-100 dark:bg-slate-800 ring-slate-300 dark:ring-slate-700", text: "text-slate-700 dark:text-slate-300" },
+            TIMBRADO:  { bg: "bg-emerald-100 dark:bg-emerald-500/20 ring-emerald-300 dark:ring-emerald-500/30", text: "text-emerald-700 dark:text-emerald-200" },
+            CANCELADO: { bg: "bg-rose-100 dark:bg-rose-500/20 ring-rose-300 dark:ring-rose-500/30", text: "text-rose-700 dark:text-rose-200" },
+          };
+          const cpStyle = cpStyles[cpEstado] || cpStyles.BORRADOR;
+          return (
+            <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-slate-100 dark:border-slate-800 flex-wrap gap-3">
+                <div>
+                  <h2 className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
+                    <ShieldCheck size={16} className="text-emerald-500" /> Carta Porte (SAT)
+                  </h2>
+                  <p className="text-[11.5px] text-slate-500 mt-0.5">Timbrado del complemento Carta Porte 3.1</p>
+                </div>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider ring-1 ${cpStyle.bg} ${cpStyle.text}`}>
+                  <Stamp size={11} /> {cpEstado}
+                </span>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {cpError && (
+                  <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 p-3 text-[12px] text-red-700 dark:text-red-300 flex items-start gap-2">
+                    <XCircle size={14} className="shrink-0 mt-0.5" />
+                    <div><strong className="block mb-0.5">Error del PAC</strong><span className="whitespace-pre-wrap break-words">{cpError}</span></div>
+                  </div>
+                )}
+
+                {cpAviso && (
+                  <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 p-3 text-[12px] text-emerald-700 dark:text-emerald-300 flex items-start gap-2">
+                    <FileCheck size={14} className="shrink-0 mt-0.5" />
+                    <div className="flex-1"><strong className="block mb-0.5">¡Timbrado exitoso!</strong><span className="whitespace-pre-wrap break-words">{cpAviso}</span></div>
+                    <button onClick={() => setCpAviso(null)} className="shrink-0 text-emerald-600/70 hover:text-emerald-700"><XCircle size={13} /></button>
+                  </div>
+                )}
+
+                {cpEstado === "TIMBRADO" && (
+                  <div className="space-y-3">
+                    {v.carta_porte_uuid && (
+                      <div className="rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 p-3">
+                        <div className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700 dark:text-emerald-300 mb-1">UUID Fiscal</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-[12px] font-bold text-slate-800 dark:text-slate-100 break-all">{v.carta_porte_uuid}</span>
+                          <button onClick={copiarUuidCp} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white dark:bg-white/10 border border-slate-200 dark:border-white/15 text-[10px] font-bold text-emerald-700 dark:text-emerald-200 hover:bg-slate-50 dark:hover:bg-white/15 transition-colors">
+                            {cpUuidCopied ? <><Check size={11} /> Copiado</> : <><Copy size={11} /> Copiar</>}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={descargarCpPdf}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-rose-600 to-red-600 text-white hover:from-rose-500 hover:to-red-500 shadow-sm transition-colors">
+                        <Download size={13} /> Descargar PDF (SAT)
+                      </button>
+                      <button onClick={descargarCpXml}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-500 shadow-sm transition-colors">
+                        <Download size={13} /> Descargar XML
+                      </button>
+                      <div className="inline-flex items-center gap-2">
+                        <select value={cpMotivo} onChange={e => setCpMotivo(e.target.value)} disabled={busyCp}
+                          className="px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono">
+                          <option value="01">01 - Comprobante con errores con relación</option>
+                          <option value="02">02 - Comprobante con errores sin relación</option>
+                          <option value="03">03 - No se llevó a cabo la operación</option>
+                          <option value="04">04 - Operación nominativa en una factura global</option>
+                        </select>
+                        <button onClick={cancelarCP} disabled={busyCp}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl border border-red-200 dark:border-red-900/40 text-red-500 bg-white dark:bg-slate-900 hover:bg-red-500 hover:text-white hover:border-red-500 disabled:opacity-60 transition-all">
+                          <Ban size={13} /> {busyCp ? "Procesando…" : "Cancelar"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(cpEstado === "BORRADOR" || cpEstado === "CANCELADO") && (
+                  <button onClick={cpEstado === "CANCELADO" ? reactivarCP : timbrarCP} disabled={busyCp}
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 text-white hover:from-emerald-500 hover:to-emerald-400 shadow-md shadow-emerald-900/20 disabled:opacity-60 transition-all">
+                    <FileCheck size={14} /> {busyCp ? "Timbrando…" : (cpEstado === "CANCELADO" ? "Volver a timbrar" : "Timbrar Carta Porte")}
+                  </button>
+                )}
+
+                {v.timbres && v.timbres.length > 0 && (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-800">
+                        <tr>
+                          {["UUID", "Estado", "Fecha", "Motivo"].map(h => (
+                            <th key={h} className="px-3 py-2 text-left text-[10px] font-extrabold text-slate-500 uppercase tracking-[0.15em]">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                        {v.timbres.map(t => (
+                          <tr key={t.id}>
+                            <td className="px-3 py-2 font-mono text-[11px] text-slate-700 dark:text-slate-300" title={t.uuid}>{t.uuid ? `${t.uuid.slice(0, 8)}…${t.uuid.slice(-4)}` : "—"}</td>
+                            <td className="px-3 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-300">{t.estado}</td>
+                            <td className="px-3 py-2 text-[11px] text-slate-500 tabular-nums">{fmtDateTime(t.fecha)}</td>
+                            <td className="px-3 py-2 text-[11px] text-slate-500">{t.motivo_cancelacion || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-slate-400 flex items-start gap-1.5">
+                  <FileText size={12} className="shrink-0 mt-0.5" />
+                  El timbrado usa el PAC configurado de la empresa (Factura.com). Si la empresa usa PAC &apos;manual&apos;, el timbre es simulado.
+                </p>
+              </div>
+            </section>
+          );
+        })()}
+
         {v.observaciones && (
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm p-5">
             <h3 className="text-[11px] font-extrabold uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-1.5"><FileText size={12} /> Observaciones</h3>
@@ -856,6 +1413,16 @@ export default function ViajeDetalle({ id }: { id: string }) {
                 <input type="number" step="0.001" value={pKms} onChange={e => setPKms(e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono" />
               </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Determinante <span className="text-[10px] text-slate-400 normal-case">(opcional)</span></label>
+              <select value={pDeterminante} onChange={e => setPDeterminante(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                <option value="">— Sin determinante —</option>
+                {determinantes.map(d => (
+                  <option key={d.id} value={d.id}>{d.codigo} · {d.nombre}{d.cliente ? ` (${d.cliente})` : ""}</option>
+                ))}
+              </select>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setOpenParada(false)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">Cancelar</button>
@@ -945,10 +1512,133 @@ export default function ViajeDetalle({ id }: { id: string }) {
               <input type="checkbox" checked={mPel} onChange={e => setMPel(e.target.checked)} className="rounded" />
               <span className="font-bold text-slate-700 dark:text-slate-300">¿Material peligroso?</span>
             </label>
+            {mPel && (
+              <div className="rounded-xl border border-rose-300 dark:border-rose-900/50 bg-rose-50/60 dark:bg-rose-950/20 ring-1 ring-rose-400/40 p-3 space-y-3">
+                <p className="text-[11.5px] font-bold text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
+                  <AlertTriangle size={12} /> Datos de material peligroso (Carta Porte SAT)
+                </p>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Clave material peligroso (SAT)</label>
+                  <input value={mClaveMP} onChange={e => setMClaveMP(e.target.value)} placeholder="Ej. 1203"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-rose-200 dark:border-rose-900/40 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Tipo de embalaje (SAT)</label>
+                    <input value={mEmbalaje} onChange={e => setMEmbalaje(e.target.value)} placeholder="Ej. 4G"
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-rose-200 dark:border-rose-900/40 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Descripción del embalaje</label>
+                    <input value={mDescEmbalaje} onChange={e => setMDescEmbalaje(e.target.value)} placeholder="Ej. Caja de cartón"
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-rose-200 dark:border-rose-900/40 bg-white dark:bg-slate-900 text-slate-900 dark:text-white" />
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => { setOpenMerc(false); resetMercForm(); }} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">Cancelar</button>
               <button type="submit" disabled={busyMerc} className="px-4 py-1.5 text-xs font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-60 inline-flex items-center gap-1.5">
                 <Save size={11} /> {busyMerc ? "Guardando…" : (mId !== null ? "Guardar cambios" : "Agregar")}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Modal Agregar Gasto de viaje */}
+      {mostrarModalGasto && (
+        <Modal onClose={() => !busyGasto && setMostrarModalGasto(false)} title="Agregar gasto">
+          <form onSubmit={guardarGasto} className="space-y-3">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-500">Categoría</label>
+                <button type="button" onClick={() => setMostrarAltaCategoria(s => !s)}
+                  className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1">
+                  <Plus size={10} /> Dar de alta categoría
+                </button>
+              </div>
+              <select value={nuevoGasto.categoria} onChange={e => setNuevoGasto(prev => ({ ...prev, categoria: e.target.value }))}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                <option value="">— Sin categoría —</option>
+                {categoriasGasto.map(c => (
+                  <option key={c.id} value={c.id}>{c.nombre}</option>
+                ))}
+              </select>
+            </div>
+
+            {mostrarAltaCategoria && (
+              <div className="rounded-xl border border-emerald-300 dark:border-emerald-900/50 bg-emerald-50/60 dark:bg-emerald-950/20 ring-1 ring-emerald-400/40 p-3 space-y-2">
+                <p className="text-[11.5px] font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                  <Plus size={12} /> Nueva categoría de gasto
+                </p>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Nombre *</label>
+                  <input value={nuevaCategoria.nombre} onChange={e => setNuevaCategoria(prev => ({ ...prev, nombre: e.target.value }))}
+                    placeholder="Ej. Casetas"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-white dark:bg-slate-900 text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Descripción</label>
+                  <input value={nuevaCategoria.descripcion} onChange={e => setNuevaCategoria(prev => ({ ...prev, descripcion: e.target.value }))}
+                    placeholder="Descripción (opcional)"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-white dark:bg-slate-900 text-slate-900 dark:text-white" />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setMostrarAltaCategoria(false)} disabled={busyCatGasto}
+                    className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-60">Cancelar</button>
+                  <button type="button" onClick={crearCategoriaGastoInline} disabled={busyCatGasto || !nuevaCategoria.nombre.trim()}
+                    className="px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-60 inline-flex items-center gap-1.5">
+                    <Save size={11} /> {busyCatGasto ? "Guardando…" : "Crear categoría"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Descripción</label>
+              <input value={nuevoGasto.descripcion} onChange={e => setNuevoGasto(prev => ({ ...prev, descripcion: e.target.value }))}
+                placeholder="Ej. Caseta autopista México-Querétaro"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Precio (MXN) *</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+                  <input type="number" step="0.01" min="0" required
+                    value={nuevoGasto.monto}
+                    onChange={e => setNuevoGasto(prev => ({ ...prev, monto: e.target.value }))}
+                    placeholder="0.00"
+                    className="w-full pl-7 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-bold" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
+                <input type="date" value={nuevoGasto.fecha} onChange={e => setNuevoGasto(prev => ({ ...prev, fecha: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">
+                Evidencias <span className="text-[10px] text-slate-400 normal-case">(opcional · PDF o imágenes)</span>
+              </label>
+              <input type="file" multiple accept="application/pdf,image/*"
+                onChange={e => setArchivosGasto(Array.from(e.target.files ?? []))}
+                className="w-full text-xs text-slate-600 dark:text-slate-300 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 file:cursor-pointer" />
+              {archivosGasto.length > 0 && (
+                <p className="text-[11px] text-slate-500 mt-1">{archivosGasto.length} archivo{archivosGasto.length !== 1 ? "s" : ""} seleccionado{archivosGasto.length !== 1 ? "s" : ""}.</p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setMostrarModalGasto(false)} disabled={busyGasto}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-60">Cancelar</button>
+              <button type="submit" disabled={busyGasto}
+                className="px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-60 inline-flex items-center gap-1.5">
+                <Save size={11} /> {busyGasto ? "Guardando…" : "Guardar gasto"}
               </button>
             </div>
           </form>
@@ -965,6 +1655,7 @@ export default function ViajeDetalle({ id }: { id: string }) {
               setBusyEdOp(true);
               try {
                 await api.actualizarOperadorLicencia(String(v.operador_id), {
+                  rfc: edOpRfc.trim().toUpperCase() || undefined,
                   numero: edOpNumLic.trim(),
                   fecha_expedicion: edOpFExp || undefined,
                   fecha_vencimiento: edOpFVenc || undefined,
@@ -982,6 +1673,13 @@ export default function ViajeDetalle({ id }: { id: string }) {
             <div className="rounded-lg bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-900/40 px-3 py-2 text-[11.5px] text-violet-700 dark:text-violet-300">
               <strong>{v.operador}</strong> · RFC <span className="font-mono">{v.operador_data?.rfc || "—"}</span><br />
               Los cambios actualizan el documento <strong>LICENCIA FEDERAL</strong> en RH y se reflejan en todos los viajes del operador.
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">RFC del Operador</label>
+              <input type="text" value={edOpRfc} onChange={e => setEdOpRfc(e.target.value.toUpperCase())} maxLength={13}
+                placeholder="XAXX010101000"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono uppercase" />
+              <p className="text-[10.5px] text-slate-400 mt-1">Cambiarlo actualiza también al empleado vinculado en RH.</p>
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Número de Licencia Federal</label>
@@ -1438,12 +2136,65 @@ export default function ViajeDetalle({ id }: { id: string }) {
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono" />
               </div>
             </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Determinante <span className="text-[10px] text-slate-400 normal-case">(opcional)</span></label>
+              <select value={edDeterminante} onChange={e => setEdDeterminante(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                <option value="">— Sin determinante —</option>
+                {determinantes.map(d => (
+                  <option key={d.id} value={d.id}>{d.codigo} · {d.nombre}{d.cliente ? ` (${d.cliente})` : ""}</option>
+                ))}
+              </select>
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setOpenEditParada(false)} disabled={busyEditParada}
                 className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">Cancelar</button>
               <button type="submit" disabled={busyEditParada}
                 className="px-4 py-1.5 text-xs font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-60 inline-flex items-center gap-1.5">
                 <Save size={11} /> {busyEditParada ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Modal Nuevo Determinante */}
+      {openDeterminante && (
+        <Modal onClose={() => !busyDt && setOpenDeterminante(false)} title="Alta de Determinante">
+          <form onSubmit={crearDeterminante} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Código *</label>
+                <input value={dtCodigo} onChange={e => setDtCodigo(e.target.value)} required placeholder="Ej. DET-001"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Cliente</label>
+                <input value={dtCliente} onChange={e => setDtCliente(e.target.value)} placeholder="Cliente"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Nombre *</label>
+              <input value={dtNombre} onChange={e => setDtNombre(e.target.value)} required placeholder="Nombre del determinante"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Ubicación</label>
+              <select value={dtUbicacion} onChange={e => setDtUbicacion(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                <option value="">— Sin ubicación —</option>
+                {lugares.map(l => (
+                  <option key={l.id} value={l.id}>{l.id_ubicacion ? `[${l.id_ubicacion}] ` : ""}{l.nombre}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setOpenDeterminante(false)} disabled={busyDt}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-60">Cancelar</button>
+              <button type="submit" disabled={busyDt}
+                className="px-4 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-60 inline-flex items-center gap-1.5">
+                <Save size={11} /> {busyDt ? "Guardando…" : "Crear determinante"}
               </button>
             </div>
           </form>

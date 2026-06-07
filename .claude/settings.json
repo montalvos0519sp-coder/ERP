@@ -9,7 +9,29 @@
       "Bash(./venv/Scripts/python.exe manage.py seed_sgc_demo)",
       "Bash(./venv/Scripts/python.exe manage.py seed_demo_all)",
       "Bash(./venv/Scripts/python.exe manage.py shell -c ' *)",
-      "Bash(./venv/Scripts/python.exe manage.py makemigrations sgc)"
+      "Bash(./venv/Scripts/python.exe manage.py makemigrations sgc)",
+      "Bash(./venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('apps/sgc/management/commands/seed_sgc_plantillas.py', encoding='utf-8'\\).read\\(\\)\\); print\\('sintaxis OK'\\)\")",
+      "Bash(powershell -Command 'Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 1000; $c = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue; if \\($c\\) {'\\\\''OCUPADO'\\\\''} else {'\\\\''libre'\\\\''}')",
+      "Bash(curl -sL -o /dev/null -w \"plantillas: %{http_code}\\\\n\" \"http://localhost:3000/sgc/plantillas/\")",
+      "Bash(curl -sL -o /dev/null -w \"cambios: %{http_code}\\\\n\" \"http://localhost:3000/sgc/cambios/\")",
+      "Bash(curl -sL -o /dev/null -w \"documentos/2: %{http_code}\\\\n\" \"http://localhost:3000/documentos/2/\")",
+      "Bash(./venv/Scripts/python.exe manage.py runserver 8000 --noreload)",
+      "Bash(./venv/Scripts/python.exe manage.py shell -c \"from apps.sgc.models import Capacitacion; Capacitacion.objects.filter\\(curso='Auditor Interno ISO 9001'\\).delete\\(\\); print\\('datos de prueba limpiados'\\)\")",
+      "Bash(./venv/Scripts/pip.exe list *)",
+      "Bash(./venv/Scripts/python.exe -c \"import django,os;os.environ.setdefault\\('DJANGO_SETTINGS_MODULE','erp_core.settings'\\);django.setup\\(\\);from apps.core.models import Empresa;print\\([f.name for f in Empresa._meta.get_fields\\(\\) if 'nombre' in f.name or 'razon' in f.name or 'logo' in f.name or 'rfc' in f.name]\\)\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; \"backend detenido\")",
+      "Bash(python manage.py seed_iso9001)",
+      "Bash(python manage.py seed_normas_extra)",
+      "Bash(python manage.py seed_sgc_plantillas)",
+      "Bash(python manage.py seed_sgc_demo --empresa 1)",
+      "Bash(python manage.py seed_sgc_diagnostico --empresa 1)",
+      "Bash(python manage.py seed_sgc_pilares --empresa 1)",
+      "Bash(python manage.py seed_sgc_colaboracion --empresa 1)",
+      "Bash(python manage.py seed_sgc_ecosistema --empresa 1)",
+      "Bash(python manage.py shell -c ' *)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:3000/documentos/8/\" -UseBasicParsing -TimeoutSec 90 -MaximumRedirection 5; \"/documentos/8 -> $\\($r.StatusCode\\)\" } catch { \"ERROR $\\($_.Exception.Message\\)\" })",
+      "PowerShell($pages = @\\(\"/documentos/8\",\"/documentos\",\"/sgc/plantillas\"\\); foreach\\($pg in $pages\\){ try { $r = Invoke-WebRequest -Uri \"http://localhost:3000$pg/\" -UseBasicParsing -TimeoutSec 90 -MaximumRedirection 5; \"$pg -> $\\($r.StatusCode\\)\" } catch { \"$pg -> ERROR $\\($_.Exception.Message\\)\" } })",
+      "PowerShell($ports = @\\(8000,3000\\); foreach\\($p in $ports\\){ $c = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue; if\\($c\\){ \"Puerto ${p}: ACTIVO\" } else { \"Puerto ${p}: caido\" } })"
     ]
   }
 }

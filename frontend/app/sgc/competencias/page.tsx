@@ -10,8 +10,9 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Award, Briefcase, Plus, UserCheck, X, Search, AlertTriangle, CheckCircle2,
   Target, GraduationCap, Trash2, ListChecks, TrendingDown, RefreshCw,
+  ChevronUp, ChevronDown, LayoutGrid,
 } from "lucide-react";
-import { Bar, BarChart, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts";
+import { Bar, BarChart, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeContext";
@@ -41,7 +42,8 @@ export default function CompetenciasPage() {
   const router = useRouter();
   const { theme, isDarkMode } = useTheme();
   const { empresaActivaId } = useUser();
-  const [tab, setTab] = useState<"brechas" | "evals" | "perfiles">("brechas");
+  const [tab, setTab] = useState<"brechas" | "evals" | "perfiles" | "matriz">("brechas");
+  const [guideOpen, setGuideOpen] = useState(true);
   const [perfiles, setPerfiles] = useState<any[]>([]);
   const [evals, setEvals] = useState<any[]>([]);
   const [brechas, setBrechas] = useState<any>(null);
@@ -89,6 +91,9 @@ export default function CompetenciasPage() {
         </div>
       </div>
 
+      {/* Banner método ISO 7.2 */}
+      <MetodoBanner open={guideOpen} setOpen={setGuideOpen} card={card} theme={theme} isDarkMode={isDarkMode} />
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KPI icon={Briefcase} color="#A855F7" label="Perfiles definidos" value={stats.perfiles} c={card} theme={theme} />
         <KPI icon={UserCheck} color="#0EA5E9" label="Personas evaluadas" value={stats.personas} c={card} theme={theme} />
@@ -97,7 +102,7 @@ export default function CompetenciasPage() {
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        {[["brechas", "Dashboard de brechas", AlertTriangle], ["evals", "Evaluaciones", UserCheck], ["perfiles", "Perfiles de puesto", Briefcase]].map(([k, l, Ic]: any) => (
+        {[["brechas", "Dashboard de brechas", AlertTriangle], ["evals", "Evaluaciones", UserCheck], ["matriz", "Matriz", LayoutGrid], ["perfiles", "Perfiles de puesto", Briefcase]].map(([k, l, Ic]: any) => (
           <button key={k} onClick={() => setTab(k)} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border ${tab === k ? "bg-gradient-to-r from-purple-500 to-fuchsia-600 text-white border-transparent" : isDarkMode ? "border-white/[0.08] text-slate-300" : "border-slate-200 text-slate-600"}`}><Ic className="w-4 h-4" /> {l}</button>
         ))}
       </div>
@@ -160,6 +165,9 @@ export default function CompetenciasPage() {
         </>
       )}
 
+      {/* TAB MATRIZ */}
+      {tab === "matriz" && <MatrizTab evals={evals} card={card} theme={theme} isDarkMode={isDarkMode} />}
+
       {/* TAB PERFILES */}
       {tab === "perfiles" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -175,7 +183,7 @@ export default function CompetenciasPage() {
       )}
 
       {editP && <PerfilModal p={editP} empresaId={empresaActivaId} isDark={isDarkMode} theme={theme} onClose={() => setEditP(null)} onSaved={() => { setEditP(null); load(); }} />}
-      {editE && <EvalModal e={editE} perfiles={perfiles} empresaId={empresaActivaId} isDark={isDarkMode} theme={theme} track={track} onClose={() => setEditE(null)} onSaved={() => { setEditE(null); load(); }} />}
+      {editE && <EvalModal e={editE} perfiles={perfiles} empresaId={empresaActivaId} isDark={isDarkMode} theme={theme} track={track} router={router} onClose={() => setEditE(null)} onSaved={() => { setEditE(null); load(); }} />}
     </div>
   );
 }
@@ -185,6 +193,120 @@ function KPI({ icon: Icon, color, label, value, c, theme }: any) {
     <div className={`rounded-2xl border p-4 ${c}`}>
       <div className="flex items-center gap-2"><span className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: color + "20", color }}><Icon className="w-4 h-4" /></span><span className={`text-2xl font-black tabular-nums ${theme.textPrimary}`}>{value}</span></div>
       <div className={`text-[11px] uppercase tracking-wider font-bold mt-1 ${theme.textTertiary}`}>{label}</div>
+    </div>
+  );
+}
+
+// ── Banner método ISO 9001 7.2 ──────────────────────────────────────────────
+function MetodoBanner({ open, setOpen, card, theme, isDarkMode }: any) {
+  const pasos = [
+    [Briefcase, "Definir perfil", "Qué competencias y nivel exige cada puesto."],
+    [UserCheck, "Evaluar", "Calificar el nivel real de cada persona."],
+    [AlertTriangle, "Detectar brecha", "El sistema calcula automáticamente dónde falta nivel."],
+    [GraduationCap, "Capacitar", "Generar un plan que cierra la brecha."],
+    [CheckCircle2, "Verificar eficacia", "Reevaluar y confirmar que la capacitación funcionó."],
+  ];
+  return (
+    <div className={`rounded-2xl border overflow-hidden ${card}`}>
+      <button onClick={() => setOpen((o: boolean) => !o)} className="w-full flex items-center justify-between gap-3 px-4 py-3">
+        <span className="flex items-center gap-2">
+          <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br from-purple-500 to-fuchsia-600 text-white"><Target className="w-4 h-4" /></span>
+          <span className={`text-sm font-black ${theme.textPrimary}`}>¿Cómo funciona? · Método ISO 9001 7.2</span>
+        </span>
+        {open ? <ChevronUp className={`w-4 h-4 ${theme.textTertiary}`} /> : <ChevronDown className={`w-4 h-4 ${theme.textTertiary}`} />}
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+            {pasos.map(([Ic, t, d]: any, i: number) => (
+              <div key={i} className={`relative rounded-xl border p-3 ${isDarkMode ? "border-white/[0.06] bg-white/[0.02]" : "border-slate-200 bg-slate-50/60"}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-black text-white bg-gradient-to-br from-purple-500 to-fuchsia-600 shrink-0">{i + 1}</span>
+                  <Ic className="w-4 h-4 text-fuchsia-400 shrink-0" />
+                  <span className={`text-xs font-black ${theme.textPrimary}`}>{t}</span>
+                </div>
+                <p className={`text-[11px] leading-snug ${theme.textTertiary}`}>{d}</p>
+              </div>
+            ))}
+          </div>
+          <p className={`text-[11px] leading-relaxed rounded-lg px-3 py-2 ${isDarkMode ? "bg-fuchsia-500/[0.07] text-fuchsia-200" : "bg-fuchsia-50 text-fuchsia-700"}`}>
+            <b>¿Por qué?</b> ISO 9001 7.2 exige asegurar que las personas son competentes para que su trabajo no afecte la calidad. Este módulo cierra el ciclo: del perfil a la eficacia.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Matriz de competencias (heatmap) ────────────────────────────────────────
+function MatrizTab({ evals, card, theme, isDarkMode }: any) {
+  const cols = useMemo(() => {
+    const set = new Set<string>();
+    evals.forEach((e: any) => (e.detalles || []).forEach((d: any) => { if (d.nombre) set.add(d.nombre); }));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [evals]);
+
+  if (!evals.length) {
+    return <div className={`rounded-2xl border p-10 text-center ${card}`}><LayoutGrid className="w-9 h-9 mx-auto mb-2 text-purple-400" /><p className={`font-bold ${theme.textPrimary}`}>Sin matriz</p><p className={`text-sm ${theme.textSecondary}`}>Evalúa al personal para ver la matriz.</p></div>;
+  }
+
+  const cellFor = (e: any, nombre: string) => (e.detalles || []).find((d: any) => d.nombre === nombre);
+  const colorFor = (d: any) => {
+    if (!d) return null;
+    const req = Number(d.nivel_requerido) || 0, act = Number(d.nivel_actual) || 0;
+    if (act >= req) return "#10B981";
+    if (act > 0) return "#F59E0B";
+    return "#F43F5E"; // act == 0 y es requerida por esa persona
+  };
+  const stickyBg = isDarkMode ? "bg-[#0F172A]" : "bg-white";
+  const headBg = isDarkMode ? "bg-[#0B1220]" : "bg-slate-50";
+  const border = isDarkMode ? "border-white/[0.06]" : "border-slate-200";
+
+  return (
+    <div className={`rounded-2xl border p-4 ${card}`}>
+      <h3 className={`text-sm font-black mb-3 ${theme.textPrimary}`}>Matriz de competencias</h3>
+      <div className="overflow-x-auto">
+        <table className="border-collapse text-xs">
+          <thead>
+            <tr>
+              <th className={`sticky left-0 z-10 ${headBg} border ${border} px-3 py-2 text-left font-black ${theme.textSecondary} min-w-[140px]`}>Persona</th>
+              {cols.map((c) => (
+                <th key={c} title={c} className={`border ${border} px-2 py-2 align-bottom ${headBg}`}>
+                  <div className={`mx-auto max-w-[72px] truncate font-bold ${theme.textSecondary}`} style={{ maxWidth: 88 }}>{c}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {evals.map((e: any) => (
+              <tr key={e.id}>
+                <td className={`sticky left-0 z-10 ${stickyBg} border ${border} px-3 py-2 font-bold truncate max-w-[140px] ${theme.textPrimary}`} title={e.persona}>{e.persona}</td>
+                {cols.map((c) => {
+                  const d = cellFor(e, c);
+                  const col = colorFor(d);
+                  return (
+                    <td key={c} className={`border ${border} text-center p-0`}>
+                      {d ? (
+                        <div title={`${c}: nivel ${d.nivel_actual} / requerido ${d.nivel_requerido}`} className="w-9 h-9 mx-auto flex items-center justify-center font-black" style={{ background: (col || "#94a3b8") + "26", color: col || "#94a3b8" }}>{Number(d.nivel_actual) || 0}</div>
+                      ) : (
+                        <div className={`w-9 h-9 mx-auto ${isDarkMode ? "bg-white/[0.02]" : "bg-slate-100/50"}`} />
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap gap-3 mt-3">
+        {[["#10B981", "Cumple"], ["#F59E0B", "En desarrollo"], ["#F43F5E", "Brecha"], ["#94a3b8", "No aplica"]].map(([c, l]) => (
+          <span key={l} className="inline-flex items-center gap-1.5 text-[11px]">
+            <span className="w-3 h-3 rounded" style={{ background: c + "55" }} />
+            <span className={theme.textTertiary}>{l}</span>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -269,7 +391,7 @@ function PerfilModal({ p, empresaId, isDark, theme, onClose, onSaved }: any) {
 }
 
 // ── Evaluación por niveles con brecha automática ────────────────────────────
-function EvalModal({ e, perfiles, empresaId, isDark, theme, track, onClose, onSaved }: any) {
+function EvalModal({ e, perfiles, empresaId, isDark, theme, track, router, onClose, onSaved }: any) {
   const [f, setF] = useState<any>({ persona: "", persona_user: null, perfil: "", nivel: 0, estado: "BRECHA", detalles: [], ...e });
   const [busy, setBusy] = useState(false);
   const miembros = useMiembros();
@@ -298,8 +420,13 @@ function EvalModal({ e, perfiles, empresaId, isDark, theme, track, onClose, onSa
   const resembrar = async () => { try { const s = await api.sembrarDetallesEvaluacion(idE); setF((p: any) => ({ ...p, ...s })); } catch (err) { alert((err as Error).message); } };
   const generarPlan = async () => { try { const r = await api.crearCapacitacionDesdeBrecha(idE); setF((p: any) => ({ ...p, ...(r?.evaluacion || {}) })); alert("Plan de capacitación creado en Capacitación."); } catch (err) { alert((err as Error).message); } };
 
+  const setEficacia = async (v: string) => { try { const r = await api.actualizarCompetencia(idE, { eficacia: v }); if (r && r.id) setF((p: any) => ({ ...p, ...r })); else refrescar(); } catch (err) { alert((err as Error).message); } };
+  const setReeval = async (v: string) => { try { const r = await api.actualizarCompetencia(idE, { fecha_reevaluacion: v || null }); if (r && r.id) setF((p: any) => ({ ...p, ...r })); else refrescar(); } catch (err) { alert((err as Error).message); } };
+
   const detalles = f.detalles || [];
   const tieneBrecha = detalles.some((d: any) => d.nivel_actual < d.nivel_requerido);
+  const radarData = detalles.map((d: any) => ({ nombre: d.nombre, requerido: Number(d.nivel_requerido) || 0, actual: Number(d.nivel_actual) || 0 }));
+  const actualColor = f.estado === "CUMPLE" ? "#10B981" : "#F59E0B";
 
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
@@ -326,6 +453,29 @@ function EvalModal({ e, perfiles, empresaId, isDark, theme, track, onClose, onSa
                   : <button onClick={generarPlan} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-emerald-500 to-green-600 inline-flex items-center gap-1"><GraduationCap className="w-3.5 h-3.5" /> Generar plan</button>)}
               </div>
 
+              {/* Radar perfil requerido vs real */}
+              {detalles.length >= 3 && (
+                <div className={`rounded-xl border p-3 ${isDark ? "border-white/[0.06] bg-white/[0.02]" : "border-slate-200 bg-slate-50/60"}`}>
+                  <span className={`text-xs font-black uppercase tracking-wider ${theme.textSecondary}`}>Perfil requerido vs. real</span>
+                  <div style={{ width: "100%", height: 260 }}>
+                    <ResponsiveContainer>
+                      <RadarChart data={radarData} outerRadius="72%">
+                        <PolarGrid stroke={isDark ? "#ffffff14" : "#0000000d"} />
+                        <PolarAngleAxis dataKey="nombre" tick={{ fontSize: 10, fill: isDark ? "#cbd5e1" : "#475569" }} />
+                        <PolarRadiusAxis domain={[0, 4]} tickCount={5} tick={{ fontSize: 9, fill: isDark ? "#64748b" : "#94a3b8" }} axisLine={false} />
+                        <Radar name="Requerido" dataKey="requerido" stroke="#A855F7" fill="#A855F7" fillOpacity={0.22} />
+                        <Radar name="Actual" dataKey="actual" stroke={actualColor} fill={actualColor} fillOpacity={0.32} />
+                        <Tooltip contentStyle={{ background: isDark ? "#0F172A" : "#fff", border: "1px solid #94a3b833", borderRadius: 12, fontSize: 12 }} />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex gap-3 justify-center">
+                    <span className="inline-flex items-center gap-1.5 text-[11px]"><span className="w-3 h-3 rounded" style={{ background: "#A855F7" }} /><span className={theme.textTertiary}>Requerido</span></span>
+                    <span className="inline-flex items-center gap-1.5 text-[11px]"><span className="w-3 h-3 rounded" style={{ background: actualColor }} /><span className={theme.textTertiary}>Actual</span></span>
+                  </div>
+                </div>
+              )}
+
               {/* Detalle por competencia */}
               <div className="flex items-center justify-between">
                 <span className={`text-xs font-black uppercase tracking-wider ${theme.textSecondary}`}>Nivel real por competencia</span>
@@ -351,6 +501,35 @@ function EvalModal({ e, perfiles, empresaId, isDark, theme, track, onClose, onSa
                   </div>
                 );
               })}
+
+              {/* Cierre del ciclo: eficacia + reevaluación */}
+              {f.capacitacion_ref && (
+                <div className={`rounded-xl border p-3 space-y-3 ${isDark ? "border-emerald-500/20 bg-emerald-500/[0.04]" : "border-emerald-500/30 bg-emerald-50/60"}`}>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <span className={`text-xs font-black uppercase tracking-wider ${theme.textSecondary}`}>Verificación de eficacia (ISO 7.2)</span>
+                  </div>
+                  <button onClick={() => router.push("/sgc/capacitacion")} className="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-600 hover:text-emerald-500">
+                    <GraduationCap className="w-4 h-4 shrink-0" /> {f.capacitacion_nombre || "Ver plan de capacitación"}
+                  </button>
+                  <div>
+                    <label className={lbl}>Resultado de la capacitación</label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {[["PENDIENTE", "Por evaluar", "#94a3b8"], ["EFICAZ", "Eficaz", "#10B981"], ["NO_EFICAZ", "No eficaz", "#F43F5E"]].map(([v, l, col]: any) => {
+                        const on = (f.eficacia || "PENDIENTE") === v;
+                        return (
+                          <button key={v} onClick={() => setEficacia(v)} className="px-3 py-1.5 rounded-lg text-xs font-bold border transition" style={on ? { background: col, color: "#fff", borderColor: "transparent" } : { background: "transparent", color: col, borderColor: col + "55" }}>{l}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <label className={lbl}>Fecha de reevaluación</label>
+                    <input type="date" className={`${inp} max-w-[200px]`} value={f.fecha_reevaluacion || ""} onChange={(e2) => set("fecha_reevaluacion", e2.target.value)} onBlur={(e2) => setReeval(e2.target.value)} />
+                  </div>
+                  <p className={`text-[11px] ${theme.textTertiary}`}>Cierra el ciclo: confirma que la capacitación elevó la competencia real.</p>
+                </div>
+              )}
             </>
           )}
         </div>

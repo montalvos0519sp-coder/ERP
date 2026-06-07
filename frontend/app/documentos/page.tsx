@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   Building2, Calendar, Download, FileText, FolderOpen, Plus, Search, Users as UsersIcon,
   X, Info, ChevronRight, ChevronLeft, Hash, Tag, CalendarClock, Eye, EyeOff, UploadCloud,
-  CheckCircle2, FileCheck2, Clock, AlertTriangle, Lightbulb, FileEdit,
+  CheckCircle2, FileCheck2, Clock, AlertTriangle, Lightbulb, FileEdit, Trash2,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useUser } from "@/lib/UserContext";
+import { DocEditor } from "@/components/documentos/DocWord";
 
 type Estado = "BORRADOR" | "EN_REVISION" | "VIGENTE" | "OBSOLETO" | "RECHAZADO";
 
@@ -20,7 +21,7 @@ interface DocumentoItem {
   codigo: string; titulo: string; descripcion: string; version: string; estado: Estado;
   archivo_url: string; archivo_nombre_original: string; archivo_mime: string; archivo_tamano: number;
   fecha_emision: string | null; fecha_aprobacion: string | null; fecha_proxima_revision: string | null;
-  etiquetas: string; palabras_clave: string; creado_por_username: string; aprobado_por_username: string;
+  etiquetas: string; palabras_clave: string; creado_por: number | null; creado_por_username: string; aprobado_por_username: string;
   actualizado: string; visible_para_todos: boolean;
 }
 interface TipoDoc { id: number; empresa: number; categoria: string; codigo: string; nombre: string; color: string; icono: string; activo: boolean; }
@@ -84,6 +85,14 @@ export default function DocumentosListPage() {
     api.getTiposDocumento({ empresa: String(empresaActiva), page_size: "100" }).then((r) => setTipos(r.results || [])).catch(() => {});
     api.getRHDepartamentos().then((r) => setDepartamentos((r.results || []).filter((d: any) => !empresaActiva || d.empresa === empresaActiva))).catch(() => {});
   }, [empresaActiva]);
+
+  const eliminar = async (d: DocumentoItem) => {
+    if (!confirm(`¿Eliminar el borrador "${d.codigo} · ${d.titulo}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      await api.eliminarDocumento(d.id);
+      setItems((prev) => prev.filter((x) => x.id !== d.id));
+    } catch (e) { alert((e as Error).message); }
+  };
 
   const stats = useMemo(() => {
     const hoy = Date.now();
@@ -182,7 +191,15 @@ export default function DocumentosListPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {items.map((d) => <DocumentoCard key={d.id} d={d} theme={theme} isDark={isDarkMode} onClick={() => router.push(`/documentos/${d.id}`)} />)}
+          {items.map((d) => {
+            const puedeEliminar = (d.estado === "BORRADOR" || d.estado === "RECHAZADO")
+              && (d.creado_por === user?.id || !!user?.is_superuser);
+            return (
+              <DocumentoCard key={d.id} d={d} theme={theme} isDark={isDarkMode}
+                onClick={() => router.push(`/documentos/${d.id}`)}
+                onDelete={puedeEliminar ? () => eliminar(d) : undefined} />
+            );
+          })}
         </div>
       )}
 
@@ -202,32 +219,42 @@ function KPI({ icon: Icon, color, label, value, c, theme }: any) {
   );
 }
 
-function DocumentoCard({ d, theme, isDark, onClick }: { d: DocumentoItem; theme: any; isDark: boolean; onClick: () => void; }) {
+function DocumentoCard({ d, theme, isDark, onClick, onDelete }: { d: DocumentoItem; theme: any; isDark: boolean; onClick: () => void; onDelete?: () => void; }) {
   const em = ESTADO_META[d.estado];
   const porVencer = d.estado === "VIGENTE" && d.fecha_proxima_revision && new Date(d.fecha_proxima_revision).getTime() - Date.now() < 30 * 864e5;
   return (
-    <button onClick={onClick} className={`group text-left rounded-3xl border overflow-hidden transition-all hover:scale-[1.01] hover:shadow-xl ${isDark ? "bg-[#0F172A]/70 border-white/[0.04]" : "bg-white border-slate-200/70"} ${porVencer ? "ring-1 ring-rose-500/30" : ""}`}>
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/30">{d.tipo_codigo}</span>
-              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${em.cls}`}>{em.label}</span>
+    <div className={`group relative rounded-3xl border overflow-hidden transition-all hover:shadow-xl ${isDark ? "bg-[#0F172A]/70 border-white/[0.04]" : "bg-white border-slate-200/70"} ${porVencer ? "ring-1 ring-rose-500/30" : ""}`}>
+      <button onClick={onClick} className="w-full text-left">
+        <div className="p-5">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-500 border border-blue-500/30">{d.tipo_codigo}</span>
+                <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${em.cls}`}>{em.label}</span>
+              </div>
+              <div className={`text-xs font-mono ${theme.textTertiary}`}>{d.codigo} · v{d.version}</div>
+              <h3 className={`text-base font-black mt-0.5 truncate ${theme.textPrimary}`}>{d.titulo}</h3>
+              {d.descripcion && <p className={`text-xs mt-1 line-clamp-2 ${theme.textSecondary}`}>{d.descripcion}</p>}
             </div>
-            <div className={`text-xs font-mono ${theme.textTertiary}`}>{d.codigo} · v{d.version}</div>
-            <h3 className={`text-base font-black mt-0.5 truncate ${theme.textPrimary}`}>{d.titulo}</h3>
-            {d.descripcion && <p className={`text-xs mt-1 line-clamp-2 ${theme.textSecondary}`}>{d.descripcion}</p>}
+            <FileText className="w-5 h-5 text-blue-500 shrink-0" />
           </div>
-          <FileText className="w-5 h-5 text-blue-500 shrink-0" />
+          <div className={`mt-4 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] ${theme.textTertiary}`}>
+            {d.departamento_nombre && <div className="inline-flex items-center gap-1 col-span-2"><Building2 className="w-3 h-3" /> {d.departamento_nombre}</div>}
+            {d.fecha_proxima_revision && <div className={`inline-flex items-center gap-1 col-span-2 ${porVencer ? "text-rose-500 font-bold" : ""}`}><CalendarClock className="w-3 h-3" /> Revisar: {d.fecha_proxima_revision}{porVencer ? " (próximo)" : ""}</div>}
+            <div className="inline-flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(d.actualizado).toLocaleDateString()}</div>
+            <div className="inline-flex items-center gap-1 truncate"><UsersIcon className="w-3 h-3" /> {d.creado_por_username || "-"}</div>
+          </div>
         </div>
-        <div className={`mt-4 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] ${theme.textTertiary}`}>
-          {d.departamento_nombre && <div className="inline-flex items-center gap-1 col-span-2"><Building2 className="w-3 h-3" /> {d.departamento_nombre}</div>}
-          {d.fecha_proxima_revision && <div className={`inline-flex items-center gap-1 col-span-2 ${porVencer ? "text-rose-500 font-bold" : ""}`}><CalendarClock className="w-3 h-3" /> Revisar: {d.fecha_proxima_revision}{porVencer ? " (próximo)" : ""}</div>}
-          <div className="inline-flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(d.actualizado).toLocaleDateString()}</div>
-          <div className="inline-flex items-center gap-1 truncate"><UsersIcon className="w-3 h-3" /> {d.creado_por_username || "-"}</div>
+      </button>
+      {onDelete && (
+        <div className={`flex justify-end px-5 py-2 border-t ${isDark ? "border-white/[0.05]" : "border-slate-100"}`}>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} title="Eliminar borrador"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-rose-500 hover:bg-rose-500/10 transition">
+            <Trash2 className="w-3.5 h-3.5" /> Eliminar borrador
+          </button>
         </div>
-      </div>
-    </button>
+      )}
+    </div>
   );
 }
 
@@ -237,8 +264,9 @@ function NuevoDocumentoModal({ empresaId, tipos, departamentos, isDark, theme, o
   onClose: () => void; onCreated: (id: number) => void;
 }) {
   const [paso, setPaso] = useState(1);
-  const [f, setF] = useState<any>({ tipo: "", departamento: "", codigo: "", titulo: "", descripcion: "", version: "1.0", fecha_proxima_revision: "", etiquetas: "", palabras_clave: "", visible_para_todos: true });
+  const [f, setF] = useState<any>({ tipo: "", departamento: "", codigo: "", titulo: "", descripcion: "", contenido: "", version: "1.0", fecha_proxima_revision: "", etiquetas: "", palabras_clave: "", visible_para_todos: true });
   const [archivo, setArchivo] = useState<File | null>(null);
+  const [modo, setModo] = useState<"archivo" | "contenido">("archivo");
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
@@ -266,6 +294,7 @@ function NuevoDocumentoModal({ empresaId, tipos, departamentos, isDark, theme, o
       fd.append("codigo", f.codigo.trim());
       fd.append("titulo", f.titulo.trim());
       fd.append("descripcion", f.descripcion);
+      if (f.contenido?.trim()) fd.append("contenido", f.contenido);
       fd.append("version", f.version);
       if (f.fecha_proxima_revision) fd.append("fecha_proxima_revision", f.fecha_proxima_revision);
       if (f.etiquetas) fd.append("etiquetas", f.etiquetas);
@@ -281,7 +310,7 @@ function NuevoDocumentoModal({ empresaId, tipos, departamentos, isDark, theme, o
 
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className={`w-full max-w-2xl rounded-3xl border overflow-hidden max-h-[94vh] flex flex-col ${isDark ? "bg-slate-900 border-white/[0.08]" : "bg-white border-slate-200"}`}>
+      <div onClick={(e) => e.stopPropagation()} className={`w-full ${paso === 3 && modo === "contenido" ? "max-w-4xl" : "max-w-2xl"} rounded-3xl border overflow-hidden max-h-[94vh] flex flex-col transition-all ${isDark ? "bg-slate-900 border-white/[0.08]" : "bg-white border-slate-200"}`}>
         {/* Encabezado + stepper */}
         <div className="px-5 py-3 shrink-0" style={{ background: "linear-gradient(90deg,#0EA5E9,#3B82F6)" }}>
           <div className="flex items-center justify-between">
@@ -347,19 +376,40 @@ function NuevoDocumentoModal({ empresaId, tipos, departamentos, isDark, theme, o
             </>
           )}
 
-          {/* PASO 3 · Archivo y vigencia */}
+          {/* PASO 3 · Contenido o archivo, y vigencia */}
           {paso === 3 && (
             <>
-              <div>
-                <label className={lbl}>Archivo (PDF, Word, Excel…)</label>
-                <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); setArchivo(e.dataTransfer.files?.[0] || null); }}
-                  className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 cursor-pointer transition ${drag ? "border-sky-500 bg-sky-500/10" : isDark ? "border-white/15 hover:border-white/30" : "border-slate-300 hover:border-sky-400"}`}>
-                  <UploadCloud className={`w-8 h-8 ${drag ? "text-sky-500" : theme.textTertiary}`} />
-                  {archivo ? <span className={`text-sm font-bold ${theme.textPrimary}`}>{archivo.name} <span className={theme.textTertiary}>({Math.round(archivo.size / 1024)} KB)</span></span>
-                    : <><span className={`text-sm font-bold ${theme.textSecondary}`}>Arrastra el archivo aquí o haz clic</span><span className={`text-[11px] ${theme.textTertiary}`}>El archivo es la versión oficial controlada</span></>}
-                  <input type="file" className="hidden" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
-                </label>
+              {/* Elección: redactar contenido en el sistema o subir un archivo */}
+              <div className={`grid grid-cols-2 gap-2 p-1 rounded-xl ${isDark ? "bg-white/[0.04]" : "bg-slate-100"}`}>
+                <button type="button" onClick={() => setModo("contenido")}
+                  className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold transition ${modo === "contenido" ? "bg-white text-sky-600 shadow-sm" : theme.textSecondary}`}>
+                  <FileEdit className="w-4 h-4" /> Redactar contenido
+                </button>
+                <button type="button" onClick={() => setModo("archivo")}
+                  className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold transition ${modo === "archivo" ? "bg-white text-sky-600 shadow-sm" : theme.textSecondary}`}>
+                  <UploadCloud className="w-4 h-4" /> Subir archivo
+                </button>
               </div>
+
+              {modo === "contenido" ? (
+                <div>
+                  <div className={`rounded-xl p-3 text-sm flex gap-2 mb-3 ${isDark ? "bg-sky-500/10 text-sky-200" : "bg-sky-50 text-sky-800"}`}>
+                    <Info className="w-5 h-5 shrink-0 text-sky-500" /><span>Redacta el documento con formato profesional. Usa la barra para insertar secciones, tablas y firmas; se podrá <b>descargar como Word</b> con los datos de tu empresa.</span>
+                  </div>
+                  <DocEditor value={f.contenido} onChange={(v: string) => set("contenido", v)} isDark={isDark} theme={theme} rows={16} defaultPreview={false} />
+                </div>
+              ) : (
+                <div>
+                  <label className={lbl}>Archivo (PDF, Word, Excel…)</label>
+                  <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); setArchivo(e.dataTransfer.files?.[0] || null); }}
+                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 cursor-pointer transition ${drag ? "border-sky-500 bg-sky-500/10" : isDark ? "border-white/15 hover:border-white/30" : "border-slate-300 hover:border-sky-400"}`}>
+                    <UploadCloud className={`w-8 h-8 ${drag ? "text-sky-500" : theme.textTertiary}`} />
+                    {archivo ? <span className={`text-sm font-bold ${theme.textPrimary}`}>{archivo.name} <span className={theme.textTertiary}>({Math.round(archivo.size / 1024)} KB)</span></span>
+                      : <><span className={`text-sm font-bold ${theme.textSecondary}`}>Arrastra el archivo aquí o haz clic</span><span className={`text-[11px] ${theme.textTertiary}`}>El archivo es la versión oficial controlada</span></>}
+                    <input type="file" className="hidden" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
+                  </label>
+                </div>
+              )}
               <div className={sec}>
                 <div className="flex items-center justify-between">
                   <label className={`${lbl} flex items-center gap-1 mb-0`}><CalendarClock className="w-3.5 h-3.5" /> Próxima revisión</label>

@@ -50,7 +50,7 @@ export default function NuevoPeriodoPage() {
     }
   };
 
-  const inp = "w-full bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-3 py-2.5 text-sm outline-none focus:border-emerald-400 dark:focus:border-emerald-500/50";
+  const inp = "w-full bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-3 py-2.5 text-sm shadow-sm outline-none transition-all focus:border-emerald-400 dark:focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/30";
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#070613]">
@@ -59,18 +59,25 @@ export default function NuevoPeriodoPage() {
           <ArrowLeft size={13} /> Volver a periodos
         </Link>
 
-        <div className="rounded-2xl border border-emerald-200/60 dark:border-emerald-500/15 bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-slate-900/40 p-5 sm:p-6 dark:backdrop-blur-xl">
-          <h1 className="text-xl font-black text-slate-800 dark:text-white flex items-center gap-2">
-            <Calculator className="text-emerald-500" /> Nuevo periodo
-          </h1>
-          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Define las fechas y la periodicidad. Despues podras cargar los empleados.</p>
+        <div className="relative overflow-hidden rounded-3xl p-6 shadow-xl" style={{ background: "linear-gradient(120deg,#10B981 0%,#14B8A6 50%,#0EA5E9 100%)" }}>
+          <div className="absolute -top-16 -right-10 w-64 h-64 rounded-full bg-white/10 blur-2xl pointer-events-none" />
+          <div className="absolute -bottom-20 left-1/3 w-72 h-72 rounded-full bg-black/10 blur-3xl pointer-events-none" />
+          <div className="relative flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm ring-1 ring-white/30 flex items-center justify-center shadow-lg shrink-0">
+              <Calculator className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Nuevo periodo</h1>
+              <p className="text-sm text-white/80">Define las fechas y la periodicidad. Despues podras cargar los empleados.</p>
+            </div>
+          </div>
         </div>
 
         {err && (
           <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/[0.08] border border-rose-200 dark:border-rose-500/30 text-sm text-rose-700 dark:text-rose-300">{err}</div>
         )}
 
-        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] p-5 sm:p-6 space-y-4">
+        <div className="bg-white dark:bg-slate-900/60 dark:backdrop-blur-xl rounded-2xl border border-slate-200/70 dark:border-white/[0.06] shadow-sm p-5 sm:p-6 space-y-4">
           <div>
             <Lbl>Nombre del periodo *</Lbl>
             <input value={data.nombre} onChange={(e) => set("nombre", e.target.value)} placeholder="Ej: 1ra quincena Mayo 2026" className={inp} />
@@ -115,7 +122,7 @@ export default function NuevoPeriodoPage() {
         <div className="flex justify-end gap-2">
           <Link href="/nomina/periodos" className="px-4 py-2 text-sm font-bold rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300">Cancelar</Link>
           <button onClick={submit} disabled={saving}
-            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-xl text-white shadow-lg disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-xl text-white shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:hover:translate-y-0"
             style={{ background: "linear-gradient(135deg,#10B981,#14B8A6)", boxShadow: "0 8px 28px -8px rgba(16,185,129,0.5)" }}>
             {saving ? <><RefreshCw size={14} className="animate-spin" /> Guardando...</> : <><Save size={14} /> Crear periodo</>}
           </button>

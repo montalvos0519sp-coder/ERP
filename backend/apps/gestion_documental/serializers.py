@@ -167,7 +167,7 @@ class DocumentoListSerializer(serializers.ModelSerializer):
         model = Documento
         fields = ["id", "empresa", "tipo", "tipo_codigo", "tipo_nombre", "tipo_categoria",
                   "departamento", "departamento_nombre",
-                  "codigo", "titulo", "descripcion", "version", "estado",
+                  "codigo", "titulo", "descripcion", "contenido", "version", "estado",
                   "archivo_url", "archivo_nombre_original", "archivo_mime", "archivo_tamano",
                   "fecha_emision", "fecha_aprobacion", "fecha_proxima_revision",
                   "fecha_obsolescencia",

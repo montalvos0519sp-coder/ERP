@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     EncuestaViewSet, encuesta_publica, responder_encuesta,
     AccionCAPAViewSet, AcuerdoRevisionViewSet, ActividadViewSet, AuditoriaViewSet,
-    CapacitacionViewSet, ComentarioViewSet,
+    CapacitacionViewSet, ParticipanteCapacitacionViewSet, ComentarioViewSet,
     DashboardSGCViewSet, ElementoContextoViewSet, EquipoViewSet, EvaluacionCompetenciaViewSet,
     EvaluacionProveedorViewSet, EvaluacionRequisitoViewSet, EvidenciaViewSet, HallazgoViewSet,
     IndicadorKPIViewSet, MedicionKPIViewSet, MiembrosViewSet, MisPendientesViewSet,
@@ -12,7 +12,11 @@ from .views import (
     ParteInteresadaViewSet, PerfilPuestoViewSet, PoliticaCalidadViewSet, ProcesoViewSet,
     QuejaViewSet, RequisitoISOViewSet, RevisionDireccionViewSet, RiesgoViewSet,
     SubtareaImplementacionViewSet, TareaImplementacionViewSet, TareaObjetivoViewSet,
-    CompetenciaPerfilViewSet, EvaluacionDetalleViewSet,
+    CompetenciaPerfilViewSet, EvaluacionDetalleViewSet, SalidaNoConformeViewSet,
+    PlantillaDocumentoViewSet, HitoCertificacionViewSet, ProgramaAuditoriaViewSet,
+    PlantillaChecklistViewSet, ItemChecklistViewSet, RegistroCalidadViewSet,
+    GestionCambioViewSet, ComunicacionSGCViewSet, ConocimientoOrganizacionalViewSet,
+    OnboardingSGCViewSet,
 )
 
 router = DefaultRouter()
@@ -25,6 +29,7 @@ router.register(r"hallazgos", HallazgoViewSet, basename="hallazgo")
 router.register(r"riesgos", RiesgoViewSet, basename="riesgo")
 router.register(r"kpis", IndicadorKPIViewSet, basename="kpi")
 router.register(r"capacitaciones", CapacitacionViewSet, basename="capacitacion")
+router.register(r"participantes-capacitacion", ParticipanteCapacitacionViewSet, basename="participante-capacitacion")
 router.register(r"equipos", EquipoViewSet, basename="equipo-sgc")
 router.register(r"evaluaciones-proveedor", EvaluacionProveedorViewSet, basename="evaluacion-proveedor")
 router.register(r"quejas", QuejaViewSet, basename="queja")
@@ -56,6 +61,18 @@ router.register(r"acuerdos-revision", AcuerdoRevisionViewSet, basename="acuerdo-
 router.register(r"encuestas", EncuestaViewSet, basename="encuesta")
 router.register(r"competencias-perfil", CompetenciaPerfilViewSet, basename="competencia-perfil")
 router.register(r"evaluacion-detalles", EvaluacionDetalleViewSet, basename="evaluacion-detalle")
+router.register(r"salidas-no-conformes", SalidaNoConformeViewSet, basename="salida-no-conforme")
+# Ecosistema de certificación
+router.register(r"plantillas", PlantillaDocumentoViewSet, basename="plantilla-doc")
+router.register(r"roadmap", HitoCertificacionViewSet, basename="hito-certificacion")
+router.register(r"programa-auditorias", ProgramaAuditoriaViewSet, basename="programa-auditoria")
+router.register(r"checklists", PlantillaChecklistViewSet, basename="checklist-auditoria")
+router.register(r"checklist-items", ItemChecklistViewSet, basename="item-checklist")
+router.register(r"registros", RegistroCalidadViewSet, basename="registro-calidad")
+router.register(r"cambios", GestionCambioViewSet, basename="gestion-cambio")
+router.register(r"comunicacion", ComunicacionSGCViewSet, basename="comunicacion-sgc")
+router.register(r"conocimiento", ConocimientoOrganizacionalViewSet, basename="conocimiento-sgc")
+router.register(r"onboarding", OnboardingSGCViewSet, basename="onboarding-sgc")
 urlpatterns = router.urls + [
     # Públicas (sin autenticación): responder por token.
     path("encuesta-publica/<str:token>/", encuesta_publica, name="encuesta-publica"),

@@ -260,11 +260,17 @@ class DocumentoViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
-        # No se permite eliminar VIGENTE: marca como OBSOLETO.
-        if instance.estado == Documento.ESTADO_VIGENTE:
-            from rest_framework.exceptions import PermissionDenied
+        from rest_framework.exceptions import PermissionDenied
+        u = self.request.user
+        # Solo el creador (o un superusuario) puede eliminar su documento.
+        if instance.creado_por_id != u.id and not u.is_superuser:
+            raise PermissionDenied("Solo el creador puede eliminar este documento.")
+        # Únicamente se permite eliminar borradores o documentos rechazados; los
+        # que ya entraron al flujo o están vigentes se conservan por trazabilidad.
+        if instance.estado not in (Documento.ESTADO_BORRADOR, Documento.ESTADO_RECHAZADO):
             raise PermissionDenied(
-                "Un documento VIGENTE no se elimina. Marca como OBSOLETO para conservar el historial."
+                "Solo puedes eliminar documentos en BORRADOR. "
+                "Un documento vigente se marca como OBSOLETO para conservar el historial."
             )
         log_evento(
             user=self.request.user, accion="doc.eliminar", nivel="WARN",
@@ -501,6 +507,75 @@ class DocumentoViewSet(viewsets.ModelViewSet):
             filename=doc.archivo_nombre_original or doc.archivo.name.split("/")[-1],
         )
         return response
+
+    @action(detail=True, methods=["get"], url_path="word")
+    def word(self, request, pk=None):
+        """Descarga el documento como Word (.docx) profesional, con encabezado de
+        control documental, historial de versiones, firmas y el contenido
+        convertido en tablas/secciones nativas."""
+        from datetime import date as _date
+        import re as _re
+        try:
+            from apps.sgc.views import _docx_controlado
+        except Exception:
+            return Response({"detail": "Generación de Word no disponible en el servidor."}, status=400)
+        from django.http import HttpResponse
+
+        doc = self.get_object()
+        empresa = doc.empresa
+        nombre_emp = (getattr(empresa, "nombre_comercial", "") or getattr(empresa, "razon_social", "") or "________________")
+        hoy = _date.today()
+        fecha_doc = (doc.fecha_emision or hoy).strftime("%d/%m/%Y")
+        try:
+            tipo_label = doc.tipo.nombre
+        except Exception:
+            tipo_label = str(doc.tipo)
+
+        # El contenido ya viene con datos sustituidos; reemplazamos marcadores por si acaso.
+        cont = (doc.contenido or doc.descripcion or "")
+        cont = (cont.replace("{{empresa}}", nombre_emp)
+                    .replace("{{razon_social}}", getattr(empresa, "razon_social", "") or nombre_emp)
+                    .replace("{{fecha}}", fecha_doc)
+                    .replace("{{anio}}", str(hoy.year))
+                    .replace("{{codigo}}", doc.codigo or "")
+                    .replace("{{rfc}}", getattr(empresa, "rfc", "") or ""))
+        m = _re.search(r"Emisi.n inicial[^\n]*\n", cont)
+        body = cont[m.end():] if m else cont
+
+        creador = (doc.creado_por.get_full_name() or doc.creado_por.username) if doc.creado_por else " "
+        aprobador = (doc.aprobado_por.get_full_name() or doc.aprobado_por.username) if doc.aprobado_por else " "
+
+        # Historial real de versiones, si existe.
+        historial = []
+        try:
+            for v in doc.versiones.all().order_by("creado"):
+                aut = (v.aprobado_por.get_full_name() or v.aprobado_por.username) if getattr(v, "aprobado_por", None) else creador
+                fch = (v.fecha_aprobacion or v.creado.date() if getattr(v, "creado", None) else hoy)
+                historial.append((v.version, fch.strftime("%d/%m/%Y") if hasattr(fch, "strftime") else str(fch),
+                                  (v.notas_cambios or "Nueva versión")[:80], aut))
+        except Exception:
+            historial = []
+        if not historial:
+            historial = [(doc.version or "1.0", fecha_doc, "Emisión inicial", creador)]
+
+        bio = _docx_controlado(
+            empresa=nombre_emp, titulo=doc.titulo or "Documento",
+            subtitulo=f"{tipo_label} · v{doc.version} · {doc.get_estado_display()}",
+            codigo=doc.codigo or "—", version=doc.version or "1.0", fecha=fecha_doc,
+            clasificacion=doc.get_estado_display(), body=body,
+            elaboro=creador, reviso=" ", aprobo=aprobador, historial=historial)
+
+        fname = (doc.codigo or "documento").replace(" ", "_") + ".docx"
+        log_evento(
+            user=request.user, accion="doc.word",
+            descripcion=f"Descargo Word de {doc.codigo} v{doc.version}",
+            meta={"documento_id": doc.id}, request=request,
+        )
+        resp = HttpResponse(
+            bio.read(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        resp["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return resp
 
     @action(detail=False, methods=["get"], url_path="pendientes-mias")
     def pendientes_mias(self, request):

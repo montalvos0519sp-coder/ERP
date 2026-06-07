@@ -20,6 +20,7 @@ import { api } from "@/lib/api";
 import { exportCSV } from "@/lib/csv";
 import { useTheme } from "@/lib/ThemeContext";
 import { useUser } from "@/lib/UserContext";
+import { SelectorUsuario, PanelColaboracion } from "@/components/sgc/Colaboracion";
 import { CampanaNotificaciones } from "@/components/sgc/CampanaNotificaciones";
 
 const PALETA = ["#06B6D4", "#8B5CF6", "#F59E0B", "#10B981", "#EF4444", "#0EA5E9", "#EC4899", "#84CC16"];
@@ -30,6 +31,8 @@ const CRITERIOS = [
   { k: "servicio", l: "Servicio", h: "Respuesta, atención y soporte" },
   { k: "documentacion", l: "Documentación", h: "Facturas, XML y certificados en regla" },
 ];
+
+const ESTADOS_EVAL = [["BORRADOR", "Borrador"], ["EVALUADO", "Evaluado"], ["SEGUIMIENTO", "Seguimiento"], ["CERRADO", "Cerrado"]];
 
 function clasif(p: number) {
   if (p >= 90) return { letra: "A", label: "Excelente", color: "#10B981", cls: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30" };
@@ -362,8 +365,9 @@ function DetalleModal({ g, isDark, theme, onClose, onNueva, onNC }: any) {
 
 function EvalModal({ empresaId, preset, isDark, theme, onClose, onSaved }: any) {
   const [provs, setProvs] = useState<any[]>([]);
-  const [f, setF] = useState<any>({ proveedor: preset?.proveedor || "", periodo: `${new Date().getFullYear()}-Q${Math.floor(new Date().getMonth() / 3) + 1}`, calidad: 80, tiempo_entrega: 80, servicio: 80, documentacion: 80, comentarios: "" });
+  const [f, setF] = useState<any>({ proveedor: preset?.proveedor || "", periodo: `${new Date().getFullYear()}-Q${Math.floor(new Date().getMonth() / 3) + 1}`, calidad: 80, tiempo_entrega: 80, servicio: 80, documentacion: 80, comentarios: "", estado: "BORRADOR", plan_mejora: "", responsable_user: null });
   const [busy, setBusy] = useState(false);
+  const idEv = f.id;
   useEffect(() => { api.getProveedores({ empresa: String(empresaId || "") }).then((r) => setProvs(r?.results || [])).catch(() => {}); }, [empresaId]);
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
   const inp = `w-full px-3 py-2 rounded-lg border text-sm outline-none ${isDark ? "bg-[#1E293B]/60 border-white/[0.08] text-white" : "bg-white border-slate-200 text-slate-900"}`;
@@ -375,7 +379,11 @@ function EvalModal({ empresaId, preset, isDark, theme, onClose, onSaved }: any) 
   const guardar = async () => {
     if (!f.proveedor) { alert("Selecciona proveedor."); return; }
     setBusy(true);
-    try { await api.crearEvaluacionProveedor({ empresa: empresaId, proveedor: f.proveedor, periodo: f.periodo, calidad: Number(f.calidad), tiempo_entrega: Number(f.tiempo_entrega), servicio: Number(f.servicio), documentacion: Number(f.documentacion), comentarios: f.comentarios || "" }); onSaved(); }
+    const payload = { empresa: empresaId, proveedor: f.proveedor, periodo: f.periodo, calidad: Number(f.calidad), tiempo_entrega: Number(f.tiempo_entrega), servicio: Number(f.servicio), documentacion: Number(f.documentacion), comentarios: f.comentarios || "", estado: f.estado, plan_mejora: f.plan_mejora || "", responsable_user: f.responsable_user || null };
+    try {
+      if (idEv) { await api.actualizarEvaluacionProveedor(idEv, payload); onSaved(); }
+      else { const saved = await api.crearEvaluacionProveedor(payload); if (saved?.id) setF((p: any) => ({ ...p, id: saved.id })); else onSaved(); }
+    }
     catch (e) { alert((e as Error).message); } finally { setBusy(false); }
   };
   return (
@@ -414,9 +422,15 @@ function EvalModal({ empresaId, preset, isDark, theme, onClose, onSaved }: any) 
             <div className="flex items-center gap-2"><span className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-black" style={{ background: c.color }}>{c.letra}</span><div><div className="text-sm font-bold" style={{ color: c.color }}>{c.label}</div><div className={`text-[11px] ${theme.textTertiary}`}>{puntaje >= 80 ? "Homologado" : "No homologado (mín. 80)"}</div></div></div>
             <span className="text-3xl font-black" style={{ color: c.color }}>{puntaje.toFixed(1)}</span>
           </div>
+          <div className="grid grid-cols-2 gap-3 items-end">
+            <SelectorUsuario label="Evaluador responsable" value={f.responsable_user} onChange={(id) => set("responsable_user", id)} />
+            <div><label className={lbl}>Estado</label><select className={inp} value={f.estado} onChange={(e) => set("estado", e.target.value)}>{ESTADOS_EVAL.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+          </div>
           <div><label className={lbl}>Comentarios</label><textarea rows={2} className={inp} value={f.comentarios} onChange={(e) => set("comentarios", e.target.value)} placeholder="Observaciones, hallazgos, compromisos…" /></div>
+          <div><label className={lbl}>Plan de mejora</label><textarea rows={2} className={inp} value={f.plan_mejora} onChange={(e) => set("plan_mejora", e.target.value)} placeholder="Acciones acordadas para mejorar el desempeño del proveedor…" /></div>
+          {idEv && <div><div className={`text-xs font-black uppercase tracking-wider mb-2 ${theme.textSecondary}`}>Colaboración</div><PanelColaboracion tipo="evaluacion_proveedor" objetoId={idEv} /></div>}
         </div>
-        <div className={`px-5 py-3 border-t flex justify-end gap-2 shrink-0 ${isDark ? "border-white/[0.08]" : "border-slate-200"}`}><button onClick={onClose} className={`px-4 py-2 rounded-xl text-sm font-bold ${isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}>Cancelar</button><button onClick={guardar} disabled={busy} className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40 bg-gradient-to-r from-cyan-600 to-teal-600">{busy ? "Guardando…" : "Guardar evaluación"}</button></div>
+        <div className={`px-5 py-3 border-t flex justify-end gap-2 shrink-0 ${isDark ? "border-white/[0.08]" : "border-slate-200"}`}><button onClick={onClose} className={`px-4 py-2 rounded-xl text-sm font-bold ${isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}>Cancelar</button><button onClick={guardar} disabled={busy} className="px-5 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40 bg-gradient-to-r from-cyan-600 to-teal-600">{busy ? "Guardando…" : (idEv ? "Guardar" : "Guardar evaluación")}</button></div>
       </div>
     </div>
   );

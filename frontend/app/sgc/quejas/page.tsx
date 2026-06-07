@@ -15,7 +15,7 @@ import { Bar, BarChart, Cell, ResponsiveContainer, XAxis, YAxis, Tooltip } from 
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useUser } from "@/lib/UserContext";
-import { PanelColaboracion } from "@/components/sgc/Colaboracion";
+import { PanelColaboracion, SelectorUsuario } from "@/components/sgc/Colaboracion";
 import { CampanaNotificaciones } from "@/components/sgc/CampanaNotificaciones";
 
 const TIPOS = [["QUEJA", "Queja"], ["RECLAMO", "Reclamo"], ["SUGERENCIA", "Sugerencia"], ["FELICITACION", "Felicitación"]];
@@ -31,11 +31,14 @@ const EST_COLOR: Record<string, string> = { ABIERTA: "bg-rose-500/15 text-rose-5
 function Estrellas({ n, onChange, size = 16 }: { n: number; onChange?: (v: number) => void; size?: number }) {
   return (
     <span className="inline-flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <button key={i} type="button" disabled={!onChange} onClick={() => onChange?.(i)} className={onChange ? "cursor-pointer" : "cursor-default"}>
-          <Star className={i <= n ? "fill-amber-400 text-amber-400" : "text-slate-400"} style={{ width: size, height: size }} />
-        </button>
-      ))}
+      {[1, 2, 3, 4, 5].map((i) => {
+        const estrella = <Star className={i <= n ? "fill-amber-400 text-amber-400" : "text-slate-400"} style={{ width: size, height: size }} />;
+        // Solo es <button> cuando es interactivo; en lectura usa <span> para no
+        // anidar botones (la tarjeta contenedora ya es un <button>).
+        return onChange
+          ? <button key={i} type="button" onClick={() => onChange(i)} className="cursor-pointer">{estrella}</button>
+          : <span key={i} className="cursor-default">{estrella}</span>;
+      })}
     </span>
   );
 }
@@ -173,7 +176,7 @@ function KPI({ icon: Icon, color, label, value, isDark, theme }: any) {
 }
 
 function QuejaModal({ q, empresaId, isDark, theme, onClose, onSaved }: any) {
-  const [f, setF] = useState<any>({ tipo: "QUEJA", cliente: "", descripcion: "", respuesta: "", satisfaccion: "", estado: "ABIERTA", ...q });
+  const [f, setF] = useState<any>({ tipo: "QUEJA", cliente: "", descripcion: "", respuesta: "", satisfaccion: "", estado: "ABIERTA", responsable_user: null, fecha_compromiso: "", ...q });
   const [busy, setBusy] = useState(false);
   const idQ = q.id || f.id;
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
@@ -182,7 +185,7 @@ function QuejaModal({ q, empresaId, isDark, theme, onClose, onSaved }: any) {
   const guardar = async () => {
     if (!f.descripcion?.trim()) { alert("Describe el caso."); return; }
     setBusy(true);
-    const payload = { empresa: empresaId, tipo: f.tipo, cliente: f.cliente || "", descripcion: f.descripcion, respuesta: f.respuesta || "", satisfaccion: f.satisfaccion ? Number(f.satisfaccion) : null, estado: f.estado };
+    const payload = { empresa: empresaId, tipo: f.tipo, cliente: f.cliente || "", descripcion: f.descripcion, respuesta: f.respuesta || "", satisfaccion: f.satisfaccion ? Number(f.satisfaccion) : null, estado: f.estado, responsable_user: f.responsable_user || null, fecha_compromiso: f.fecha_compromiso || null };
     try {
       if (idQ) { await api.actualizarQueja(idQ, payload); onSaved(); }
       else { const saved = await api.crearQueja(payload); if (saved?.id) setF((p: any) => ({ ...p, id: saved.id })); }
@@ -199,6 +202,10 @@ function QuejaModal({ q, empresaId, isDark, theme, onClose, onSaved }: any) {
           </div>
           <div><label className={lbl}>Descripción del caso *</label><textarea rows={2} className={inp} value={f.descripcion} onChange={(e) => set("descripcion", e.target.value)} placeholder="¿Qué reportó el cliente? Producto/servicio, fecha y detalle." /></div>
           <div><label className={lbl}>Respuesta / acción tomada</label><textarea rows={2} className={inp} value={f.respuesta} onChange={(e) => set("respuesta", e.target.value)} placeholder="¿Cómo se atendió?" /></div>
+          <div className="grid grid-cols-2 gap-3 items-end">
+            <SelectorUsuario value={f.responsable_user} onChange={(id) => set("responsable_user", id)} label="Responsable de atención" />
+            <div><label className={lbl}>Fecha compromiso</label><input type="date" className={inp} value={f.fecha_compromiso || ""} onChange={(e) => set("fecha_compromiso", e.target.value)} /></div>
+          </div>
           <div className={`rounded-xl border p-3 flex items-center justify-between ${isDark ? "border-white/[0.06] bg-white/[0.02]" : "border-slate-200 bg-slate-50/60"}`}>
             <span className={`text-sm font-bold ${theme.textSecondary}`}>Satisfacción del cliente</span>
             <div className="flex items-center gap-2"><Estrellas n={Number(f.satisfaccion) || 0} onChange={(v) => set("satisfaccion", v)} size={22} />{f.satisfaccion && <button type="button" onClick={() => set("satisfaccion", "")} className="text-[10px] text-slate-400 hover:text-rose-400">limpiar</button>}</div>

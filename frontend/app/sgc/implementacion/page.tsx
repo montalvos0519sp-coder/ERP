@@ -5,10 +5,11 @@
 // las columnas Por hacer → En proceso → Implementado → Verificado, con
 // responsable, prioridad y avance. Arrastrar y soltar entre columnas.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, RefreshCw, Plus, Sparkles, X, GripVertical, Trash2, Flag, CheckCircle2, Circle, ListChecks,
+  Info, ChevronDown, ChevronUp, Search, AlertTriangle, Wand2, MousePointerClick, UserCheck, ClipboardCheck,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -37,7 +38,13 @@ export default function ImplementacionPage() {
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState<any | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
   const [genBusy, setGenBusy] = useState(false);
+  const [guia, setGuia] = useState(true);
+  const [q, setQ] = useState("");
+  const [fPrio, setFPrio] = useState("TODAS");
+  const [fResp, setFResp] = useState("TODOS");
+  const [soloVencidas, setSoloVencidas] = useState(false);
 
   const load = useCallback(() => {
     if (!empresaActivaId) return;
@@ -72,6 +79,29 @@ export default function ImplementacionPage() {
   const card = isDarkMode ? "bg-[#0F172A]/70 border-white/[0.05]" : "bg-white border-slate-200/70";
   const colTareas = (k: string) => board.columnas.find((c: any) => c.clave === k)?.tareas || [];
 
+  const todas = useMemo(() => (board.columnas || []).flatMap((c: any) => c.tareas || []), [board]);
+  const hoy = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
+  const esVencida = (t: any) => t.fecha_limite && new Date(t.fecha_limite) < hoy && t.columna !== "VERIFICADO";
+  const responsables = useMemo(() => {
+    const m = new Map<number, string>();
+    todas.forEach((t: any) => { if (t.responsable_user) m.set(t.responsable_user, t.responsable_nombre || "—"); });
+    return Array.from(m.entries());
+  }, [todas]);
+  const stats = useMemo(() => ({
+    vencidas: todas.filter(esVencida).length,
+    sinResp: todas.filter((t: any) => !t.responsable_user).length,
+    alta: todas.filter((t: any) => t.prioridad === "ALTA" && t.columna !== "VERIFICADO").length,
+  }), [todas]);
+  const hayFiltro = q || fPrio !== "TODAS" || fResp !== "TODOS" || soloVencidas;
+  const filtrar = (tareas: any[]) => tareas.filter((t: any) => {
+    if (q && !`${t.clausula || ""} ${t.requisito_titulo || ""} ${t.titulo || ""} ${t.descripcion || ""}`.toLowerCase().includes(q.toLowerCase())) return false;
+    if (fPrio !== "TODAS" && t.prioridad !== fPrio) return false;
+    if (fResp !== "TODOS" && String(t.responsable_user) !== String(fResp)) return false;
+    if (soloVencidas && !esVencida(t)) return false;
+    return true;
+  });
+  const vis = (k: string) => filtrar(colTareas(k));
+
   return (
     <div className="max-w-[1400px] mx-auto p-6 space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -91,16 +121,70 @@ export default function ImplementacionPage() {
         </div>
       </div>
 
-      {/* Barra de progreso global */}
+      {/* Guía de uso */}
+      <div className={`rounded-2xl border overflow-hidden ${card}`}>
+        <button onClick={() => setGuia(!guia)} className="w-full flex items-center justify-between gap-2 px-4 py-3">
+          <span className={`text-sm font-black flex items-center gap-2 ${theme.textPrimary}`}><Info className="w-4 h-4 text-indigo-400" /> ¿Cómo funciona el tablero? · ¿Por qué importa?</span>
+          {guia ? <ChevronUp className={`w-4 h-4 ${theme.textTertiary}`} /> : <ChevronDown className={`w-4 h-4 ${theme.textTertiary}`} />}
+        </button>
+        {guia && (
+          <div className={`px-4 pb-4 border-t ${isDarkMode ? "border-white/[0.06]" : "border-slate-100"}`}>
+            <p className={`text-xs mt-3 mb-3 ${theme.textSecondary}`}>
+              Certificarse no es solo escribir documentos: hay que <b>implementar</b> cada requisito de la norma en la operación real. Este tablero convierte las cláusulas de ISO 9001 en tareas accionables y reparte el trabajo en el equipo, para que <b>nada se quede sin hacer</b> y veas el avance en tiempo real. El método:
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {[
+                { ic: Wand2, t: "1. Genera desde ISO", d: "Crea una tarjeta por cada cláusula (4–10) con un clic en «Generar desde ISO»." },
+                { ic: UserCheck, t: "2. Asigna y prioriza", d: "Da responsable, prioridad y fecha límite a cada tarjeta." },
+                { ic: ListChecks, t: "3. Desglosa en subtareas", d: "Divide la tarjeta en pasos con peso; su avance se calcula solo." },
+                { ic: MousePointerClick, t: "4. Arrastra y verifica", d: "Mueve las tarjetas Por hacer → En proceso → Implementado → Verificado." },
+              ].map((s, i) => (
+                <div key={i} className={`rounded-xl border p-3 ${isDarkMode ? "border-white/[0.06] bg-white/[0.02]" : "border-slate-200 bg-slate-50/60"}`}>
+                  <div className="flex items-center gap-2 mb-1"><span className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center"><s.ic className="w-4 h-4" /></span><span className={`text-xs font-black ${theme.textPrimary}`}>{s.t}</span></div>
+                  <p className={`text-[11px] leading-snug ${theme.textTertiary}`}>{s.d}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Barra de progreso global + indicadores */}
       <div className={`rounded-2xl border p-4 ${card}`}>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
           <span className={`text-sm font-bold ${theme.textPrimary}`}>Avance de implementación</span>
-          <span className="text-sm font-black bg-gradient-to-r from-indigo-500 to-violet-600 bg-clip-text text-transparent">{board.progreso}% · {board.verificadas}/{board.total} verificadas</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {stats.alta > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-500 inline-flex items-center gap-1"><Flag className="w-3 h-3" /> {stats.alta} alta prioridad</span>}
+            {stats.vencidas > 0 && <button onClick={() => setSoloVencidas(!soloVencidas)} className={`text-[11px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 transition ${soloVencidas ? "bg-rose-600 text-white" : "bg-amber-500/15 text-amber-600 hover:bg-amber-500/25"}`}><AlertTriangle className="w-3 h-3" /> {stats.vencidas} vencidas</button>}
+            {stats.sinResp > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-500/15 text-slate-400 inline-flex items-center gap-1"><UserCheck className="w-3 h-3" /> {stats.sinResp} sin responsable</span>}
+            <span className="text-sm font-black bg-gradient-to-r from-indigo-500 to-violet-600 bg-clip-text text-transparent">{board.progreso}% · {board.verificadas}/{board.total} verificadas</span>
+          </div>
         </div>
         <div className={`h-3 rounded-full overflow-hidden ${isDarkMode ? "bg-white/[0.06]" : "bg-slate-100"}`}>
           <div className="h-full bg-gradient-to-r from-indigo-500 via-sky-500 to-emerald-500 transition-all" style={{ width: `${board.progreso}%` }} />
         </div>
       </div>
+
+      {/* Filtros */}
+      {board.total > 0 && (
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex gap-1.5 flex-wrap items-center">
+            {[["TODAS", "Prioridad"], ["ALTA", "Alta"], ["MEDIA", "Media"], ["BAJA", "Baja"]].map(([v, l]) => (
+              <button key={v} onClick={() => setFPrio(v)} className={`px-2.5 py-1 rounded-lg text-xs font-bold border inline-flex items-center gap-1 ${fPrio === v ? "bg-gradient-to-r from-indigo-500 to-violet-600 text-white border-transparent" : isDarkMode ? "border-white/[0.08] text-slate-300" : "border-slate-200 text-slate-600"}`}>
+                {v !== "TODAS" && <Flag className="w-3 h-3" />} {l}
+              </button>
+            ))}
+            {responsables.length > 0 && (
+              <select value={fResp} onChange={(e) => setFResp(e.target.value)} className={`px-2.5 py-1 rounded-lg text-xs font-bold border outline-none ${isDarkMode ? "bg-[#1E293B]/60 border-white/[0.08] text-slate-300" : "bg-white border-slate-200 text-slate-600"}`}>
+                <option value="TODOS">Todos los responsables</option>
+                {responsables.map(([uid, nom]) => <option key={uid} value={uid}>{nom}</option>)}
+              </select>
+            )}
+            {hayFiltro && <button onClick={() => { setQ(""); setFPrio("TODAS"); setFResp("TODOS"); setSoloVencidas(false); }} className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300">limpiar filtros</button>}
+          </div>
+          <div className="relative"><Search className={`w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 ${theme.textTertiary}`} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar tarjeta…" className={`pl-8 pr-3 py-2 rounded-lg border text-sm outline-none ${isDarkMode ? "bg-[#1E293B]/60 border-white/[0.08] text-white" : "bg-white border-slate-200 text-slate-900"}`} /></div>
+        </div>
+      )}
 
       {/* Tablero */}
       {board.total === 0 && !loading ? (
@@ -112,25 +196,33 @@ export default function ImplementacionPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {COLS.map((col) => (
+          {COLS.map((col) => {
+            const lista = vis(col.k);
+            const activa = dragOver === col.k;
+            return (
             <div key={col.k}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => soltar(col.k)}
-              className={`rounded-2xl border ${card} flex flex-col min-h-[200px]`}>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+              onDragOver={(e) => { e.preventDefault(); if (dragOver !== col.k) setDragOver(col.k); }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(null); }}
+              onDrop={() => { setDragOver(null); soltar(col.k); }}
+              className={`rounded-2xl border flex flex-col min-h-[200px] transition ${activa ? "ring-2 ring-offset-0" : ""} ${card}`}
+              style={activa ? { borderColor: col.c, boxShadow: `0 0 0 2px ${col.c}55` } : undefined}>
+              <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: isDarkMode ? "#ffffff0d" : "#0000000a" }}>
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ background: col.c }} />
                   <span className={`text-sm font-black ${theme.textPrimary}`}>{col.t}</span>
                 </div>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isDarkMode ? "bg-white/[0.06] text-slate-400" : "bg-slate-100 text-slate-500"}`}>{colTareas(col.k).length}</span>
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: col.c + "20", color: col.c }}>{lista.length}</span>
               </div>
               <div className="p-2.5 space-y-2.5 flex-1">
-                {colTareas(col.k).map((t: any) => (
+                {lista.map((t: any) => {
+                  const vencida = esVencida(t);
+                  return (
                   <div key={t.id}
                     draggable
                     onDragStart={() => setDrag(t.id)}
+                    onDragEnd={() => { setDrag(null); setDragOver(null); }}
                     onClick={() => setEdit(t)}
-                    className={`group rounded-xl border p-3 cursor-pointer transition hover:shadow-md ${isDarkMode ? "bg-[#0B1220]/60 border-white/[0.06] hover:border-indigo-500/40" : "bg-white border-slate-200 hover:border-indigo-400/50"}`}>
+                    className={`group rounded-xl border p-3 cursor-pointer transition hover:shadow-md ${drag === t.id ? "opacity-40" : ""} ${vencida ? "border-rose-500/50" : isDarkMode ? "bg-[#0B1220]/60 border-white/[0.06] hover:border-indigo-500/40" : "bg-white border-slate-200 hover:border-indigo-400/50"}`}>
                     <div className="flex items-start gap-1.5">
                       <GripVertical className={`w-4 h-4 mt-0.5 shrink-0 opacity-30 group-hover:opacity-60 ${theme.textTertiary}`} />
                       <div className="flex-1 min-w-0">
@@ -139,7 +231,7 @@ export default function ImplementacionPage() {
                         <div className="flex items-center gap-2 mt-2 flex-wrap">
                           <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded border ${PRIO_COLOR[t.prioridad]}`}><Flag className="w-2.5 h-2.5 inline" /> {t.prioridad}</span>
                           {t.subtareas?.length > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 inline-flex items-center gap-0.5"><ListChecks className="w-2.5 h-2.5" /> {t.subtareas.filter((s: any) => s.avance >= 100).length}/{t.subtareas.length}</span>}
-                          {t.fecha_limite && <span className={`text-[10px] ${theme.textTertiary}`}>{t.fecha_limite}</span>}
+                          {t.fecha_limite && <span className={`text-[10px] inline-flex items-center gap-0.5 ${vencida ? "text-rose-500 font-bold" : theme.textTertiary}`}>{vencida && <AlertTriangle className="w-2.5 h-2.5" />}{t.fecha_limite}</span>}
                           {t.responsable_nombre && <span className="ml-auto"><Avatar nombre={t.responsable_nombre} id={t.responsable_user} size={22} /></span>}
                         </div>
                         {t.avance > 0 && (
@@ -150,11 +242,13 @@ export default function ImplementacionPage() {
                       </div>
                     </div>
                   </div>
-                ))}
-                {colTareas(col.k).length === 0 && <p className={`text-[11px] text-center py-4 ${theme.textTertiary}`}>Suelta tarjetas aquí</p>}
+                  );
+                })}
+                {lista.length === 0 && <p className={`text-[11px] text-center py-4 ${theme.textTertiary}`}>{activa ? "Suelta aquí" : hayFiltro ? "Sin tarjetas (filtro)" : "Suelta tarjetas aquí"}</p>}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

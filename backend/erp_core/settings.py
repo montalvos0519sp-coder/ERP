@@ -250,7 +250,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "erp_core.pagination.StandardPagination",
     "PAGE_SIZE": 50,
     # En produccion, sin renderer browsable — ahorra CPU y previene XSS via JSON.
     "DEFAULT_RENDERER_CLASSES": (
@@ -342,6 +342,21 @@ if not DEBUG:
             "django.request": {"level": "WARNING"},
         },
     }
+
+# ── Correo electrónico (notificaciones del SGC) ────────────────────────────
+# Por defecto usa la consola (desarrollo). En producción define EMAIL_HOST,
+# EMAIL_HOST_USER, EMAIL_HOST_PASSWORD por variables de entorno para enviar real.
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "SGC Calidad <no-reply@erp.local>")
+# Interruptor para enviar correos de notificación del SGC (in-app siempre se crean).
+SGC_EMAIL_NOTIFICACIONES = os.environ.get("SGC_EMAIL_NOTIFICACIONES", "true").lower() == "true"
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
 # ── Path al folder con los catalogos SAT en Excel ──────────────────────────
 CATALOGOS_SAT_DIR = BASE_DIR / "data_catalogos"

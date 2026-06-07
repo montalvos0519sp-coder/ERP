@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  Building2, ChevronDown, ChevronRight, Clock, Command, FileText, Globe, Lock,
+  ChevronDown, ChevronRight, Clock, Command, FileText, Globe, Lock,
   LogOut, Moon, Pin, PinOff, Search, Settings, ShieldCheck, Sun, UserCircle, X,
 } from "lucide-react";
 
@@ -25,7 +25,7 @@ export default function DashboardShell({ children }: { children?: React.ReactNod
   const pathname = usePathname();
   const { isDarkMode, theme, toggleTheme } = useTheme();
   const { prefs } = useUserPrefs();
-  const { user, loading, empresaActivaId, setEmpresaActiva, logout } = useUser();
+  const { user, loading, empresaActivaId, logout } = useUser();
 
   // Logo de la empresa (lo puede subir el staff desde /admin/configuracion).
   const empresaActiva = user?.empresas.find((e) => e.id === empresaActivaId) || user?.empresas[0];
@@ -62,7 +62,6 @@ export default function DashboardShell({ children }: { children?: React.ReactNod
   const [expandedMenus, setExpandedMenus] = useState<string[]>([]);
   const [pinnedTabs, setPinnedTabs] = useState<{ id: string; label: string; href: string }[]>([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [showEmpresaPicker, setShowEmpresaPicker] = useState(false);
 
   useEffect(() => {
     try {
@@ -256,41 +255,13 @@ export default function DashboardShell({ children }: { children?: React.ReactNod
                 <div className={`hidden sm:flex items-center gap-1.5 text-[8.5px] font-bold mt-0.5 uppercase tracking-widest ${headerTextSecondary}`}>
                   <Globe size={8} className="animate-[spin_14s_linear_infinite] opacity-70" />
                   <span className="truncate max-w-[180px] md:max-w-[280px]">
-                    {empresaActiva?.nombre || "ERP-PROFESIONAL"} · {empresaActiva?.rfc || "MULTI-EMPRESA"}
+                    {empresaActiva?.nombre || "ERP-PROFESIONAL"}{empresaActiva?.rfc ? ` · ${empresaActiva.rfc}` : ""}
                   </span>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Selector multi-empresa */}
-              {(user.empresas?.length || 0) > 1 && (
-                <div className="relative">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setShowEmpresaPicker((s) => !s); setShowUserMenu(false); }}
-                    className={`hidden md:flex items-center gap-2 px-3 py-2 rounded-xl border ${headerButton}`}
-                  >
-                    <Building2 size={13} />
-                    <span className="text-[11px] font-bold uppercase tracking-wider">{empresaActiva?.nombre}</span>
-                    <ChevronDown size={10} className={`transition-transform duration-300 ${showEmpresaPicker ? "rotate-180" : ""}`} />
-                  </button>
-                  {showEmpresaPicker && (
-                    <div className={`absolute top-full right-0 mt-3 w-64 rounded-2xl shadow-2xl border overflow-hidden animate-[var(--animate-slide-down)] origin-top-right z-[300] ${theme.surfaceElevated}`}>
-                      {user.empresas.map((emp) => (
-                        <button
-                          key={emp.id}
-                          onClick={() => { setEmpresaActiva(emp.id); setShowEmpresaPicker(false); }}
-                          className={`w-full text-left px-4 py-3 ${theme.accentHover} ${emp.id === empresaActivaId ? (isDarkMode ? "bg-emerald-500/10" : "bg-blue-500/5") : ""}`}
-                        >
-                          <div className={`text-sm font-bold ${theme.textPrimary}`}>{emp.nombre}</div>
-                          <div className={`text-[10px] ${theme.textTertiary}`}>{emp.rfc} · {emp.rol}</div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
               <ChatBell headerButton={headerButton} />
               <NotificacionesBell headerButton={headerButton} />
 
@@ -312,7 +283,7 @@ export default function DashboardShell({ children }: { children?: React.ReactNod
                 return (
                   <div className="relative">
                     <button
-                      onClick={(e) => { e.stopPropagation(); setShowUserMenu((s) => !s); setShowEmpresaPicker(false); }}
+                      onClick={(e) => { e.stopPropagation(); setShowUserMenu((s) => !s); }}
                       className={`flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-xl border transition-all hover:scale-105 active:scale-95 ${headerButton} ${showUserMenu ? "bg-white/25 border-white/50" : ""}`}
                     >
                       <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center font-black text-[11px]" style={{ color: isDarkMode ? "#14B8A6" : "#1A73E8" }}>
@@ -442,6 +413,7 @@ interface SidebarInnerProps {
   activeTab: string;
   menu: MenuSection[];
   empresaNombre: string;
+  empresaLogo?: string | null;
   empresaId?: number;
   expandedMenus: string[];
   pinnedTabs: { id: string; label: string; href: string }[];

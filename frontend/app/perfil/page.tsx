@@ -12,6 +12,7 @@ import {
   ACCENT_SWATCHES, FONT_FAMILY_LABEL, FONT_SIZE_LABEL,
   type FontFamilyKey, type FontSizeKey, useUserPrefs,
 } from "@/lib/UserPrefsContext";
+import PortalEmpleado from "./PortalEmpleado";
 
 // ─── Tipos auxiliares ────────────────────────────────────────────────────────
 const FONT_SAMPLES: Record<FontFamilyKey, string> = {
@@ -123,11 +124,14 @@ export default function PerfilPage() {
 
         {/* Stat strip */}
         <div className={`relative grid grid-cols-3 border-t ${theme.divider}`}>
-          <Stat icon={<Building2 className="w-4 h-4" />} label="Empresas" value={user.empresas.length} isDark={isDarkMode} />
+          <Stat icon={<Building2 className="w-4 h-4" />} label="Empresa" value={user.empresas[0]?.nombre ?? "—"} isDark={isDarkMode} />
           <Stat icon={<Zap className="w-4 h-4" />} label="Módulos accesibles" value={user.is_superuser ? "Todos" : modulosTotal} isDark={isDarkMode} divider />
           <Stat icon={<IdCard className="w-4 h-4" />} label="ID interno" value={`#${user.id}`} isDark={isDarkMode} divider />
         </div>
       </div>
+
+      {/* ── PORTAL DEL EMPLEADO (solo si el usuario es un empleado vinculado) ─ */}
+      <PortalEmpleado />
 
       {/* ── DOS COLUMNAS ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -150,51 +154,8 @@ export default function PerfilPage() {
             <Field label="Usuario" value={user.username} icon={<AtSign className="w-4 h-4" />} isDark={isDarkMode} mono />
             <Field label="Correo" value={user.email || "—"} icon={<Mail className="w-4 h-4" />} isDark={isDarkMode} />
             <Field label="Rol" value={rol} icon={<ShieldCheck className="w-4 h-4" />} isDark={isDarkMode} />
-            <Field label="Empresas" value={String(user.empresas.length)} icon={<Building2 className="w-4 h-4" />} isDark={isDarkMode} />
+            <Field label="Empresa" value={user.empresas[0]?.nombre ?? "—"} icon={<Building2 className="w-4 h-4" />} isDark={isDarkMode} />
           </ul>
-
-          {user.empresas.length > 0 && (
-            <div>
-              <p className={`text-[11px] font-black uppercase tracking-wider mb-2 ${theme.textTertiary}`}>
-                Membresías
-              </p>
-              <ul className="space-y-2">
-                {user.empresas.map((e) => (
-                  <li
-                    key={e.id}
-                    className={`flex items-center gap-3 p-2.5 rounded-xl border ${
-                      isDarkMode
-                        ? "bg-white/[0.02] border-white/[0.04]"
-                        : "bg-slate-50/70 border-slate-200/60"
-                    }`}
-                  >
-                    <div
-                      className="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center text-white text-[11px] font-black"
-                      style={{
-                        background:
-                          e.color_primario && e.color_secundario
-                            ? `linear-gradient(135deg,${e.color_primario},${e.color_secundario})`
-                            : "linear-gradient(135deg,#1A73E8,#14B8A6)",
-                      }}
-                    >
-                      {e.nombre.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-sm font-bold truncate ${theme.textPrimary}`}>{e.nombre}</p>
-                      <p className={`text-[10px] uppercase tracking-wider ${theme.textTertiary}`}>
-                        {e.rfc} · {e.rol}
-                      </p>
-                    </div>
-                    {e.es_staff && (
-                      <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                        Staff
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </section>
 
         {/* ── Apariencia ─────────────────────────────────────────────── */}
