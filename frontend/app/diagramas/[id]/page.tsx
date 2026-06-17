@@ -6,10 +6,13 @@ import React, {
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowLeft, ArrowRight, Bold, ChevronDown,
-  ChevronRight as ChevronRightIcon, Circle as CircleIcon, Eye, FileText, Globe, Hand,
+  ChevronRight as ChevronRightIcon, Circle as CircleIcon, Copy, Eye, FileText, Globe, Hand,
   Image as ImageIcon, Italic, Link2, Lock, Minus, MousePointer2, Palette, Pencil,
   Plus, Rows3, Save, Search, Share2, Square as SquareIcon, Star, Trash2, Type,
   Underline, User as UserIcon, Users, Workflow, X, ZapOff,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+  AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
+  AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
 } from "lucide-react";
 import {
   BaseEdge, Background, BackgroundVariant, ConnectionMode, Controls,
@@ -134,6 +137,285 @@ const SHAPES: ShapeDef[] = [
 const SHAPE_BY_KIND = Object.fromEntries(SHAPES.map((s) => [s.kind, s]));
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * PLANTILLAS ISO 9001
+ * Diagramas pre-armados listos para insertar en el lienzo. Cada plantilla
+ * devuelve nodos (con ids locales) + conexiones; al insertarse se les reasigna
+ * un id único y se desplazan al centro de la vista.
+ * ──────────────────────────────────────────────────────────────────────────── */
+interface PlantillaISO {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  build: () => { nodes: Node<ShapeData>[]; edges: Edge[] };
+}
+
+function tnode(
+  id: string, shape: ShapeKind, x: number, y: number, label: string,
+  color: string, w?: number, h?: number, extra?: Partial<ShapeData>,
+): Node<ShapeData> {
+  return {
+    id, type: "shape", position: { x, y },
+    data: {
+      shape, label, color, fontSize: 14, align: "center",
+      ...(w ? { width: w } : {}), ...(h ? { height: h } : {}), ...(extra || {}),
+    },
+  };
+}
+function tedge(source: string, target: string, sh?: string, th?: string, label?: string): Edge {
+  return { id: `${source}__${target}`, source, target, sourceHandle: sh, targetHandle: th, label } as Edge;
+}
+
+const ISO_PLANTILLAS: PlantillaISO[] = [
+  {
+    id: "mapa-procesos",
+    nombre: "Mapa de procesos",
+    descripcion: "Estratégicos · operativos · apoyo, del requisito a la satisfacción del cliente (ISO 9001 4.4).",
+    build: () => ({
+      nodes: [
+        tnode("cli1", "oval", 0, 200, "CLIENTE · Requisitos", COLOR_TERMINAL, 170, 90),
+        tnode("cli2", "oval", 1010, 200, "CLIENTE · Satisfacción", COLOR_TERMINAL, 170, 90),
+        tnode("tEstr", "text", 220, -42, "PROCESOS ESTRATÉGICOS / DIRECCIÓN", "#64748B", 480, 28, { bold: true, align: "left", fontSize: 13 }),
+        tnode("e1", "rect", 220, 0, "Planeación estratégica", COLOR_DATOS, 230, 72),
+        tnode("e2", "rect", 480, 0, "Revisión por la dirección", COLOR_DATOS, 230, 72),
+        tnode("e3", "rect", 740, 0, "Gestión de la calidad y mejora", COLOR_DATOS, 230, 72),
+        tnode("tOper", "text", 220, 152, "PROCESOS OPERATIVOS (CLAVE)", "#64748B", 480, 28, { bold: true, align: "left", fontSize: 13 }),
+        tnode("o1", "rect", 220, 190, "Ventas / Comercial", COLOR_FLUJO, 230, 72),
+        tnode("o2", "rect", 480, 190, "Diseño y desarrollo", COLOR_FLUJO, 230, 72),
+        tnode("o3", "rect", 740, 190, "Producción / Prestación del servicio", COLOR_FLUJO, 230, 72),
+        tnode("tApoyo", "text", 220, 342, "PROCESOS DE APOYO (SOPORTE)", "#64748B", 480, 28, { bold: true, align: "left", fontSize: 13 }),
+        tnode("a1", "rect", 220, 380, "Recursos humanos", "#0EA5E9", 230, 72),
+        tnode("a2", "rect", 480, 380, "Compras / Proveedores", "#0EA5E9", 230, 72),
+        tnode("a3", "rect", 740, 380, "Mantenimiento / TI", "#0EA5E9", 230, 72),
+      ],
+      edges: [
+        tedge("cli1", "o1", "s-right", "t-left", "Requisitos"),
+        tedge("o1", "o2", "s-right", "t-left"),
+        tedge("o2", "o3", "s-right", "t-left"),
+        tedge("o3", "cli2", "s-right", "t-left", "Satisfacción"),
+      ],
+    }),
+  },
+  {
+    id: "tortuga",
+    nombre: "Diagrama de tortuga",
+    descripcion: "Caracterización del proceso: entradas, salidas, recursos, personal, métodos e indicadores.",
+    build: () => ({
+      nodes: [
+        tnode("c", "rect", 320, 200, "PROCESO (nombre)", COLOR_FLUJO, 220, 110),
+        tnode("ent", "parallelogram", 30, 210, "ENTRADAS", COLOR_DATOS, 190, 80),
+        tnode("sal", "parallelogram", 640, 210, "SALIDAS", COLOR_TERMINAL, 190, 80),
+        tnode("tl", "rect", 60, 30, "¿Con qué? Recursos / Infraestructura", COLOR_DECISION, 220, 90),
+        tnode("tr", "rect", 580, 30, "¿Con quién? Personal / Competencias", COLOR_DECISION, 220, 90),
+        tnode("bl", "rect", 60, 380, "¿Cómo? Métodos / Procedimientos", "#0EA5E9", 220, 90),
+        tnode("br", "rect", 580, 380, "Indicadores / KPI (¿con qué resultados?)", COLOR_CONECTOR, 220, 90),
+      ],
+      edges: [
+        tedge("ent", "c", "s-right", "t-left"),
+        tedge("c", "sal", "s-right", "t-left"),
+        tedge("tl", "c", "s-bottom", "t-top"),
+        tedge("tr", "c", "s-bottom", "t-top"),
+        tedge("bl", "c", "s-top", "t-bottom"),
+        tedge("br", "c", "s-top", "t-bottom"),
+      ],
+    }),
+  },
+  {
+    id: "phva",
+    nombre: "Ciclo PHVA (PDCA)",
+    descripcion: "Planificar · Hacer · Verificar · Actuar — mejora continua (ISO 9001 0.3.2).",
+    build: () => ({
+      nodes: [
+        tnode("p", "rounded", 0, 0, "PLANIFICAR", COLOR_TERMINAL, 230, 110),
+        tnode("h", "rounded", 360, 0, "HACER", COLOR_FLUJO, 230, 110),
+        tnode("v", "rounded", 360, 260, "VERIFICAR", COLOR_DECISION, 230, 110),
+        tnode("a", "rounded", 0, 260, "ACTUAR", COLOR_DATOS, 230, 110),
+      ],
+      edges: [
+        tedge("p", "h", "s-right", "t-left", "Objetivos y procesos"),
+        tedge("h", "v", "s-bottom", "t-top", "Implementar"),
+        tedge("v", "a", "s-left", "t-right", "Medir y evaluar"),
+        tedge("a", "p", "s-top", "t-bottom", "Mejorar"),
+      ],
+    }),
+  },
+  {
+    id: "sipoc",
+    nombre: "SIPOC",
+    descripcion: "Proveedores · Entradas · Proceso · Salidas · Clientes (visión de alto nivel del proceso).",
+    build: () => ({
+      nodes: [
+        tnode("s", "rect", 0, 0, "PROVEEDORES (S)", "#0EA5E9", 180, 64),
+        tnode("i", "rect", 200, 0, "ENTRADAS (I)", COLOR_DATOS, 180, 64),
+        tnode("p", "rect", 400, 0, "PROCESO (P)", COLOR_FLUJO, 180, 64),
+        tnode("o", "rect", 600, 0, "SALIDAS (O)", COLOR_TERMINAL, 180, 64),
+        tnode("c", "rect", 800, 0, "CLIENTES (C)", COLOR_DECISION, 180, 64),
+        tnode("s2", "rounded", 0, 100, "…", "#94A3B8", 180, 90),
+        tnode("i2", "rounded", 200, 100, "…", "#94A3B8", 180, 90),
+        tnode("p2", "rounded", 400, 100, "1. …  2. …  3. …", "#94A3B8", 180, 90),
+        tnode("o2", "rounded", 600, 100, "…", "#94A3B8", 180, 90),
+        tnode("c2", "rounded", 800, 100, "…", "#94A3B8", 180, 90),
+      ],
+      edges: [
+        tedge("s", "i", "s-right", "t-left"),
+        tedge("i", "p", "s-right", "t-left"),
+        tedge("p", "o", "s-right", "t-left"),
+        tedge("o", "c", "s-right", "t-left"),
+      ],
+    }),
+  },
+  {
+    id: "procedimiento",
+    nombre: "Procedimiento (flujo)",
+    descripcion: "Flujo básico con inicio, actividad, decisión y fin para documentar un procedimiento.",
+    build: () => ({
+      nodes: [
+        tnode("start", "oval", 80, 0, "Inicio", COLOR_TERMINAL, 160, 60),
+        tnode("a1", "rect", 80, 110, "Actividad / Tarea", COLOR_FLUJO, 160, 64),
+        tnode("dec", "diamond", 60, 224, "¿Cumple?", COLOR_DECISION, 200, 110),
+        tnode("a3", "rect", 340, 247, "Siguiente actividad", COLOR_FLUJO, 180, 64),
+        tnode("a2", "rect", 80, 390, "Acción correctiva", COLOR_FLUJO, 160, 64),
+        tnode("end", "oval", 340, 390, "Fin", COLOR_TERMINAL, 160, 60),
+      ],
+      edges: [
+        tedge("start", "a1", "s-bottom", "t-top"),
+        tedge("a1", "dec", "s-bottom", "t-top"),
+        tedge("dec", "a3", "s-right", "t-left", "Sí"),
+        tedge("dec", "a2", "s-bottom", "t-top", "No"),
+        tedge("a2", "a1", "s-left", "t-left"),
+        tedge("a3", "end", "s-bottom", "t-top"),
+      ],
+    }),
+  },
+  {
+    id: "no-conformidad",
+    nombre: "No conformidad / Acción correctiva",
+    descripcion: "Flujo de tratamiento de NC y acción correctiva con causa raíz y eficacia (ISO 9001 10.2).",
+    build: () => ({
+      nodes: [
+        tnode("start", "oval", 100, 0, "No conformidad detectada", COLOR_TERMINAL, 220, 60),
+        tnode("r1", "rect", 100, 110, "Registrar la NC", COLOR_FLUJO, 220, 64),
+        tnode("r2", "rect", 100, 220, "Corrección inmediata (contención)", COLOR_FLUJO, 220, 64),
+        tnode("dec", "diamond", 90, 330, "¿Requiere acción correctiva?", COLOR_DECISION, 240, 120),
+        tnode("fin1", "oval", 420, 360, "Cierre (solo corrección)", COLOR_TERMINAL, 200, 60),
+        tnode("r3", "rect", 100, 500, "Análisis de causa raíz", COLOR_FLUJO, 220, 64),
+        tnode("r4", "rect", 100, 610, "Plan de acción correctiva", COLOR_FLUJO, 220, 64),
+        tnode("r5", "rect", 100, 720, "Implementar acciones", COLOR_FLUJO, 220, 64),
+        tnode("dec2", "diamond", 90, 830, "¿Acción eficaz?", COLOR_DECISION, 240, 120),
+        tnode("reabrir", "rect", 420, 862, "Reabrir / nuevo análisis", COLOR_DECISION, 200, 64),
+        tnode("fin2", "oval", 100, 1000, "Cierre de la NC", COLOR_TERMINAL, 220, 60),
+      ],
+      edges: [
+        tedge("start", "r1", "s-bottom", "t-top"),
+        tedge("r1", "r2", "s-bottom", "t-top"),
+        tedge("r2", "dec", "s-bottom", "t-top"),
+        tedge("dec", "fin1", "s-right", "t-left", "No"),
+        tedge("dec", "r3", "s-bottom", "t-top", "Sí"),
+        tedge("r3", "r4", "s-bottom", "t-top"),
+        tedge("r4", "r5", "s-bottom", "t-top"),
+        tedge("r5", "dec2", "s-bottom", "t-top"),
+        tedge("dec2", "fin2", "s-bottom", "t-top", "Sí"),
+        tedge("dec2", "reabrir", "s-right", "t-left", "No"),
+        tedge("reabrir", "r3", "s-top", "t-right"),
+      ],
+    }),
+  },
+  {
+    id: "organigrama",
+    nombre: "Organigrama",
+    descripcion: "Estructura organizacional y responsabilidades (apoya roles del SGC, ISO 9001 5.3).",
+    build: () => ({
+      nodes: [
+        tnode("dg", "rect", 340, 0, "Dirección General", COLOR_DATOS, 220, 64),
+        tnode("c1", "rect", 0, 150, "Gestión de Calidad (SGC)", COLOR_FLUJO, 200, 60),
+        tnode("c2", "rect", 230, 150, "Operaciones / Producción", COLOR_FLUJO, 200, 60),
+        tnode("c3", "rect", 460, 150, "Comercial / Ventas", COLOR_FLUJO, 200, 60),
+        tnode("c4", "rect", 690, 150, "Administración y Finanzas", COLOR_FLUJO, 200, 60),
+        tnode("c2a", "rect", 200, 280, "Producción", "#0EA5E9", 180, 56),
+        tnode("c2b", "rect", 400, 280, "Mantenimiento", "#0EA5E9", 180, 56),
+      ],
+      edges: [
+        tedge("dg", "c1", "s-bottom", "t-top"),
+        tedge("dg", "c2", "s-bottom", "t-top"),
+        tedge("dg", "c3", "s-bottom", "t-top"),
+        tedge("dg", "c4", "s-bottom", "t-top"),
+        tedge("c2", "c2a", "s-bottom", "t-top"),
+        tedge("c2", "c2b", "s-bottom", "t-top"),
+      ],
+    }),
+  },
+  {
+    id: "gestion-riesgos",
+    nombre: "Gestión de riesgos",
+    descripcion: "Identificar, analizar, evaluar y tratar riesgos y oportunidades (ISO 9001 6.1).",
+    build: () => ({
+      nodes: [
+        tnode("start", "oval", 100, 0, "Identificar riesgo / oportunidad", COLOR_TERMINAL, 240, 60),
+        tnode("a1", "rect", 100, 110, "Analizar: probabilidad × impacto", COLOR_FLUJO, 240, 64),
+        tnode("a2", "rect", 100, 220, "Evaluar nivel de riesgo", COLOR_FLUJO, 240, 64),
+        tnode("dec", "diamond", 110, 330, "¿Aceptable?", COLOR_DECISION, 220, 110),
+        tnode("mon", "oval", 430, 357, "Monitorear y registrar", COLOR_TERMINAL, 200, 60),
+        tnode("a3", "rect", 100, 480, "Plan de tratamiento (mitigar / evitar / transferir)", COLOR_FLUJO, 260, 72),
+        tnode("a4", "rect", 100, 600, "Implementar acciones", COLOR_FLUJO, 240, 64),
+        tnode("a5", "rect", 100, 710, "Verificar eficacia", COLOR_FLUJO, 240, 64),
+      ],
+      edges: [
+        tedge("start", "a1", "s-bottom", "t-top"),
+        tedge("a1", "a2", "s-bottom", "t-top"),
+        tedge("a2", "dec", "s-bottom", "t-top"),
+        tedge("dec", "mon", "s-right", "t-left", "Sí"),
+        tedge("dec", "a3", "s-bottom", "t-top", "No"),
+        tedge("a3", "a4", "s-bottom", "t-top"),
+        tedge("a4", "a5", "s-bottom", "t-top"),
+        tedge("a5", "mon", "s-right", "t-bottom"),
+      ],
+    }),
+  },
+  {
+    id: "gestion-cambio",
+    nombre: "Gestión del cambio",
+    descripcion: "Cambios planificados al SGC de forma controlada (ISO 9001 6.3).",
+    build: () => ({
+      nodes: [
+        tnode("start", "oval", 100, 0, "Solicitud de cambio", COLOR_TERMINAL, 220, 60),
+        tnode("a1", "rect", 100, 110, "Evaluar propósito y consecuencias", COLOR_FLUJO, 240, 64),
+        tnode("a2", "rect", 100, 220, "Evaluar integridad del SGC y recursos", COLOR_FLUJO, 260, 64),
+        tnode("dec", "diamond", 110, 330, "¿Aprobado?", COLOR_DECISION, 220, 110),
+        tnode("fin1", "oval", 430, 357, "Rechazar / archivar", COLOR_TERMINAL, 190, 60),
+        tnode("a3", "rect", 100, 480, "Planificar recursos y responsables", COLOR_FLUJO, 260, 64),
+        tnode("a4", "rect", 100, 590, "Implementar el cambio", COLOR_FLUJO, 240, 64),
+        tnode("a5", "rect", 100, 700, "Verificar y comunicar", COLOR_FLUJO, 240, 64),
+        tnode("fin2", "oval", 100, 810, "Cambio cerrado", COLOR_TERMINAL, 220, 60),
+      ],
+      edges: [
+        tedge("start", "a1", "s-bottom", "t-top"),
+        tedge("a1", "a2", "s-bottom", "t-top"),
+        tedge("a2", "dec", "s-bottom", "t-top"),
+        tedge("dec", "fin1", "s-right", "t-left", "No"),
+        tedge("dec", "a3", "s-bottom", "t-top", "Sí"),
+        tedge("a3", "a4", "s-bottom", "t-top"),
+        tedge("a4", "a5", "s-bottom", "t-top"),
+        tedge("a5", "fin2", "s-bottom", "t-top"),
+      ],
+    }),
+  },
+  {
+    id: "foda",
+    nombre: "Análisis FODA",
+    descripcion: "Fortalezas, oportunidades, debilidades y amenazas — contexto de la organización (ISO 9001 4.1).",
+    build: () => ({
+      nodes: [
+        tnode("tit", "text", 0, -44, "Análisis FODA · Contexto de la organización (4.1)", "#64748B", 600, 28, { bold: true, align: "left", fontSize: 14 }),
+        tnode("f", "rect", 0, 0, "FORTALEZAS (internas +)", COLOR_TERMINAL, 300, 170, { align: "left", fontSize: 15, bold: true }),
+        tnode("d", "rect", 320, 0, "DEBILIDADES (internas −)", "#EF4444", 300, 170, { align: "left", fontSize: 15, bold: true }),
+        tnode("o", "rect", 0, 190, "OPORTUNIDADES (externas +)", COLOR_FLUJO, 300, 170, { align: "left", fontSize: 15, bold: true }),
+        tnode("am", "rect", 320, 190, "AMENAZAS (externas −)", COLOR_DECISION, 300, 170, { align: "left", fontSize: 15, bold: true }),
+      ],
+      edges: [],
+    }),
+  },
+];
+
+/* ────────────────────────────────────────────────────────────────────────────
  * DATA shape de cada nodo
  * ──────────────────────────────────────────────────────────────────────────── */
 interface ShapeData {
@@ -152,6 +434,8 @@ interface ShapeData {
   lanes?: string[]; // títulos de cada banda en swimlane
   editing?: boolean;  // true cuando este nodo está en modo edición inline
   editingLaneIndex?: number; // qué carril está en edición (solo swimlanes)
+  procesoRef?: number | null;   // vínculo a un Proceso del SGC
+  procesoNombre?: string;       // nombre cacheado para mostrar
   [key: string]: unknown;
 }
 
@@ -222,6 +506,22 @@ function InlineEditable({
 /* ────────────────────────────────────────────────────────────────────────────
  * Render del nodo dentro del canvas
  * ──────────────────────────────────────────────────────────────────────────── */
+// Aclara/oscurece un color hex en `amt` (-1..1). Usado para degradados sutiles.
+function shade(hex: string, amt: number): string {
+  let h = (hex || "#3B82F6").replace("#", "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const n = parseInt(h, 16);
+  if (Number.isNaN(n)) return hex;
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const f = (v: number) => Math.max(0, Math.min(255, Math.round(v + (amt < 0 ? v : 255 - v) * amt)));
+  r = f(r); g = f(g); b = f(b);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+// Degradado sutil para el relleno de una figura.
+function fillGradient(color: string): string {
+  return `linear-gradient(160deg, ${shade(color, 0.16)} 0%, ${color} 55%, ${shade(color, -0.12)} 100%)`;
+}
+
 function handleStyle(color: string, pos: "top" | "right" | "bottom" | "left"): React.CSSProperties {
   // Handles 18px, con offset negativo para que floten ligeramente fuera de la
   // figura. El area de impacto efectiva es aun mayor por `connectionRadius`.
@@ -254,11 +554,12 @@ function ShapeNode({ id, data, selected }: NodeProps<Node<ShapeData>>) {
   const w = data.width ?? def.w;
   const h = data.height ?? def.h;
 
-  const ringClass = selected ? "ring-4 ring-pink-400/60 shadow-2xl" : "shadow-md";
+  const ringClass = selected ? "ring-[3px] ring-fuchsia-400/70 shadow-xl" : "shadow-md";
 
   const textStyle: React.CSSProperties = {
     fontSize, fontWeight, fontStyle, textDecoration, textAlign,
     color: "#fff", lineHeight: 1.25, wordBreak: "break-word",
+    textShadow: "0 1px 2px rgba(0,0,0,0.22)",
   };
 
   const startEdit = () => editorBus.patch(id, { editing: true });
@@ -282,10 +583,13 @@ function ShapeNode({ id, data, selected }: NodeProps<Node<ShapeData>>) {
   const wrap = (extra: React.CSSProperties = {}, textOverrides: React.CSSProperties = {}) => (
     <div
       onDoubleClick={startEdit}
-      className={`relative flex items-center justify-center text-center px-3 py-2 select-none transition-shadow ${ringClass}`}
+      className={`relative flex items-center justify-center text-center px-3 py-2 select-none transition-all ${ringClass}`}
       style={{
-        width: w, height: h, background: color,
+        width: w, height: h, background: fillGradient(color),
         outline: sw ? `${sw}px solid ${stroke}` : undefined,
+        boxShadow: selected
+          ? `0 8px 24px ${shade(color, -0.2)}66`
+          : `0 2px 6px rgba(0,0,0,0.14), inset 0 1px 0 ${shade(color, 0.25)}55`,
         ...extra,
       }}
     >
@@ -303,8 +607,9 @@ function ShapeNode({ id, data, selected }: NodeProps<Node<ShapeData>>) {
     case "parallelogram":
       body = (
         <div onDoubleClick={startEdit}
-          className={`relative flex items-center justify-center text-center px-4 py-2 select-none transition-shadow ${ringClass}`}
-          style={{ width: w, height: h, background: color, transform: "skewX(-18deg)" }}>
+          className={`relative flex items-center justify-center text-center px-4 py-2 select-none transition-all ${ringClass}`}
+          style={{ width: w, height: h, background: fillGradient(color), transform: "skewX(-18deg)",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.14)" }}>
           <div style={{ transform: "skewX(18deg)" }}>{renderText()}</div>
         </div>
       );
@@ -337,7 +642,7 @@ function ShapeNode({ id, data, selected }: NodeProps<Node<ShapeData>>) {
       body = (
         <div onDoubleClick={startEdit}
           className={`relative flex items-center justify-center px-8 py-2 ${ringClass}`}
-          style={{ width: w, height: h, background: color }}>
+          style={{ width: w, height: h, background: fillGradient(color), boxShadow: "0 2px 6px rgba(0,0,0,0.14)" }}>
           <div className="absolute inset-y-0 left-2 w-px" style={{ background: "rgba(255,255,255,0.5)" }} />
           <div className="absolute inset-y-0 right-2 w-px" style={{ background: "rgba(255,255,255,0.5)" }} />
           {renderText()}
@@ -554,6 +859,14 @@ function ShapeNode({ id, data, selected }: NodeProps<Node<ShapeData>>) {
       <Handle id="t-left" type="target" position={Position.Left} style={handleStyle(color, "left")} />
       <Handle id="s-left" type="source" position={Position.Left} style={handleStyle(color, "left")} />
       {body}
+      {data.procesoRef != null && (
+        <div
+          title={`Vinculado a proceso: ${data.procesoNombre || ""}`}
+          className="absolute -top-2 -right-2 z-20 w-5 h-5 rounded-full flex items-center justify-center shadow-md"
+          style={{ background: "linear-gradient(135deg,#0EA5E9,#6366F1)" }}>
+          <Link2 className="w-3 h-3 text-white" />
+        </div>
+      )}
     </>
   );
 }
@@ -773,6 +1086,18 @@ function EditorInner() {
   const searchParams = useSearchParams();
   const id = params?.id as string;
   const { isDarkMode, theme } = useTheme();
+  const { empresaActivaId } = useUser();
+
+  // Catálogos del SGC para vincular figuras a procesos reales y ver sus KPIs/riesgos.
+  const [procesos, setProcesos] = useState<any[]>([]);
+  const [kpisSGC, setKpisSGC] = useState<any[]>([]);
+  const [riesgosSGC, setRiesgosSGC] = useState<any[]>([]);
+  useEffect(() => {
+    if (!empresaActivaId) return;
+    api.getProcesosSGC(empresaActivaId).then((r) => setProcesos(r?.results || [])).catch(() => {});
+    api.getKPIs({ empresa: String(empresaActivaId) }).then((r) => setKpisSGC(r?.results || [])).catch(() => {});
+    api.getRiesgos({ empresa: String(empresaActivaId) }).then((r) => setRiesgosSGC(r?.results || [])).catch(() => {});
+  }, [empresaActivaId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<ShapeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -803,6 +1128,7 @@ function EditorInner() {
   // asi los callbacks (onConnect, etc.) no caen en closures stale.
   const nodesRef = useRef<Node<ShapeData>[]>([]);
   const edgesRef = useRef<Edge[]>([]);
+  const clipboardRef = useRef<{ nodes: Node<ShapeData>[]; edges: Edge[] }>({ nodes: [], edges: [] });
 
   // Permisos derivados de lo que devuelve el backend (`mi_permiso`).
   const miPermiso: "propietario" | "editar" | "ver" | "ninguno" =
@@ -1087,11 +1413,111 @@ function EditorInner() {
     } finally { setSaving(false); }
   }, [id, diagrama, titulo, publico, nodes, edges, saving, readOnly]);
 
+  // ── Clonar / copiar / pegar / mover (nudge) ──────────────────────────────
+  const _clonar = useCallback((srcNodes: Node<ShapeData>[], srcEdges: Edge[], dx: number, dy: number) => {
+    if (srcNodes.length === 0) return;
+    const stamp = Date.now().toString(36);
+    const idMap: Record<string, string> = {};
+    const newNodes = srcNodes.map((n) => {
+      const nid = `${n.id}-c${stamp}`;
+      idMap[n.id] = nid;
+      const { parentId: _p, ...rest } = n as any; // soltar parent para no dejar refs colgantes
+      return { ...rest, id: nid, selected: true, position: { x: n.position.x + dx, y: n.position.y + dy } };
+    });
+    const ids = new Set(srcNodes.map((n) => n.id));
+    const newEdges = srcEdges
+      .filter((e) => ids.has(e.source) && ids.has(e.target))
+      .map((e, i) => ({ ...e, id: `e-c${stamp}-${i}`, source: idMap[e.source], target: idMap[e.target] }));
+    setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes]);
+    setEdges((eds) => [...eds, ...newEdges]);
+    setSelectedIds(newNodes.map((n) => n.id));
+  }, [setNodes, setEdges]);
+
+  const duplicarSelected = useCallback(() => {
+    if (readOnly) return;
+    const set = new Set(selectedIds);
+    _clonar(nodesRef.current.filter((n) => set.has(n.id)), edgesRef.current, 28, 28);
+  }, [readOnly, selectedIds, _clonar]);
+
+  const copiarSelected = useCallback(() => {
+    const set = new Set(selectedIds);
+    clipboardRef.current = {
+      nodes: nodesRef.current.filter((n) => set.has(n.id)).map((n) => ({ ...n })),
+      edges: edgesRef.current.filter((e) => set.has(e.source) && set.has(e.target)).map((e) => ({ ...e })),
+    };
+  }, [selectedIds]);
+
+  const pegar = useCallback(() => {
+    if (readOnly) return;
+    const { nodes: ns, edges: es } = clipboardRef.current;
+    _clonar(ns, es, 36, 36);
+  }, [readOnly, _clonar]);
+
+  const nudge = useCallback((dx: number, dy: number) => {
+    if (readOnly || selectedIds.length === 0) return;
+    const set = new Set(selectedIds);
+    setNodes((nds) => nds.map((n) => set.has(n.id) ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } : n));
+  }, [readOnly, selectedIds, setNodes]);
+
+  // Alinear / distribuir la selección (2+ nodos).
+  const alinear = useCallback((modo: string) => {
+    if (readOnly) return;
+    const set = new Set(selectedIds);
+    const sel = nodesRef.current.filter((n) => set.has(n.id));
+    if (sel.length < 2) return;
+    const boxes = sel.map((n) => {
+      const def = SHAPE_BY_KIND[n.data.shape]?.defaults || { w: 160, h: 64 };
+      return { id: n.id, x: n.position.x, y: n.position.y, w: n.data.width ?? def.w, h: n.data.height ?? def.h };
+    });
+    const minL = Math.min(...boxes.map((b) => b.x));
+    const maxR = Math.max(...boxes.map((b) => b.x + b.w));
+    const minT = Math.min(...boxes.map((b) => b.y));
+    const maxB = Math.max(...boxes.map((b) => b.y + b.h));
+    const cX = (minL + maxR) / 2, cY = (minT + maxB) / 2;
+    const pos: Record<string, { x?: number; y?: number }> = {};
+    if (modo === "left") boxes.forEach((b) => { pos[b.id] = { x: minL }; });
+    if (modo === "centerH") boxes.forEach((b) => { pos[b.id] = { x: cX - b.w / 2 }; });
+    if (modo === "right") boxes.forEach((b) => { pos[b.id] = { x: maxR - b.w }; });
+    if (modo === "top") boxes.forEach((b) => { pos[b.id] = { y: minT }; });
+    if (modo === "middleV") boxes.forEach((b) => { pos[b.id] = { y: cY - b.h / 2 }; });
+    if (modo === "bottom") boxes.forEach((b) => { pos[b.id] = { y: maxB - b.h }; });
+    if (modo === "distH" && boxes.length >= 3) {
+      const s = [...boxes].sort((a, b) => a.x - b.x);
+      const gap = ((maxR - minL) - s.reduce((acc, b) => acc + b.w, 0)) / (s.length - 1);
+      let cur = minL;
+      s.forEach((b) => { pos[b.id] = { x: cur }; cur += b.w + gap; });
+    }
+    if (modo === "distV" && boxes.length >= 3) {
+      const s = [...boxes].sort((a, b) => a.y - b.y);
+      const gap = ((maxB - minT) - s.reduce((acc, b) => acc + b.h, 0)) / (s.length - 1);
+      let cur = minT;
+      s.forEach((b) => { pos[b.id] = { y: cur }; cur += b.h + gap; });
+    }
+    setNodes((nds) => nds.map((n) => pos[n.id]
+      ? { ...n, position: { x: pos[n.id].x ?? n.position.x, y: pos[n.id].y ?? n.position.y } }
+      : n));
+  }, [readOnly, selectedIds, setNodes]);
+
   // Atajos teclado
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       const enInput = t?.matches?.("input,textarea") || t?.isContentEditable;
+      const mod = e.metaKey || e.ctrlKey;
+      // Duplicar / copiar / pegar
+      if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); if (!enInput && !readOnly) duplicarSelected(); return; }
+      if (mod && e.key.toLowerCase() === "c" && !enInput) { copiarSelected(); return; }
+      if (mod && e.key.toLowerCase() === "v" && !enInput) { e.preventDefault(); if (!readOnly) pegar(); return; }
+      // Mover selección con flechas (Shift = 10px)
+      if (!enInput && !readOnly && selectedIds.length > 0 && e.key.startsWith("Arrow")) {
+        e.preventDefault();
+        const d = e.shiftKey ? 10 : 1;
+        if (e.key === "ArrowUp") nudge(0, -d);
+        else if (e.key === "ArrowDown") nudge(0, d);
+        else if (e.key === "ArrowLeft") nudge(-d, 0);
+        else if (e.key === "ArrowRight") nudge(d, 0);
+        return;
+      }
       // Undo / Redo. Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z o Ctrl/Cmd+Y = redo.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         if (enInput) return;
@@ -1124,7 +1550,7 @@ function EditorInner() {
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [guardar, selectedIds, setNodes, undo, redo, readOnly]);
+  }, [guardar, selectedIds, setNodes, undo, redo, readOnly, duplicarSelected, copiarSelected, pegar, nudge]);
 
   /* ── Export ── */
   const capturarCanvasPng = useCallback(async (): Promise<string | null> => {
@@ -1204,6 +1630,32 @@ function EditorInner() {
     }
   }, [construirPdf, titulo]);
 
+  // Exporta un .doc (HTML compatible con Word) con la imagen del diagrama.
+  const exportarWord = useCallback(async () => {
+    setExportOpen(false);
+    try {
+      const dataUrl = await capturarCanvasPng();
+      if (!dataUrl) return;
+      const t = titulo || "Diagrama";
+      const desc = diagrama?.descripcion ? `<p style="font-family:Arial;font-size:11pt;color:#555">${diagrama.descripcion}</p>` : "";
+      const html =
+        `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" ` +
+        `xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">` +
+        `<head><meta charset="utf-8"><title>${t}</title></head>` +
+        `<body><h1 style="font-family:Arial;font-size:16pt">${t}</h1>${desc}` +
+        `<img src="${dataUrl}" style="max-width:680px;width:100%"/>` +
+        `<p style="font-family:Arial;font-size:8pt;color:#999;margin-top:18px">Generado desde ERP Profesional · módulo Diagramas</p>` +
+        `</body></html>`;
+      const blob = new Blob(["﻿", html], { type: "application/msword" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${t}.doc`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch (e) {
+      alert("Error exportando Word: " + (e as Error).message);
+    }
+  }, [capturarCanvasPng, titulo, diagrama]);
+
   // Visualiza el diagrama como PDF dentro de la app (overlay con iframe).
   const verPdf = useCallback(async () => {
     setExportOpen(false);
@@ -1249,6 +1701,11 @@ function EditorInner() {
     updateNodes((id) => set.has(id), patch);
   };
 
+  const vincularProceso = useCallback((procesoRef: number | null) => {
+    const p = procesos.find((x) => x.id === procesoRef);
+    updateNodes((nid) => selectedIds.includes(nid), { procesoRef, procesoNombre: p ? (p.nombre || "") : "" });
+  }, [procesos, selectedIds, updateNodes]);
+
   // Conecta el bus singleton (NO Context) a estos handlers, así los ShapeNode
   // pueden disparar cambios sin necesidad de prop-drilling ni Provider —
   // evita la cascada de re-renders que rompía ReactFlow.
@@ -1269,6 +1726,65 @@ function EditorInner() {
     setEdges((eds) => eds.filter((e) => !set.has(e.source) && !set.has(e.target)));
     setSelectedIds([]);
   };
+
+  // Inserta una plantilla ISO 9001 completa en el centro de la vista actual.
+  const insertarPlantilla = useCallback((plantilla: PlantillaISO) => {
+    if (readOnly) return;
+    const { nodes: tn, edges: te } = plantilla.build();
+    const stamp = Date.now().toString(36);
+    const idMap: Record<string, string> = {};
+
+    // Offset hacia el centro/arriba de la vista actual para que caiga visible.
+    let ox = 80, oy = 80;
+    const inst = rfInstanceRef.current;
+    if (inst && rfWrapper.current) {
+      const rect = rfWrapper.current.getBoundingClientRect();
+      const c = inst.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 3 });
+      ox = Math.round(c.x) - 300;
+      oy = Math.round(c.y) - 120;
+    }
+
+    const newNodes = tn.map((n) => {
+      const nid = `${plantilla.id}-${n.id}-${stamp}`;
+      idMap[n.id] = nid;
+      return { ...n, id: nid, selected: true, position: { x: n.position.x + ox, y: n.position.y + oy } };
+    });
+
+    const edgeStyle = { stroke: isDarkMode ? "#94A3B8" : "#475569", strokeWidth: 2.5 };
+    const marker = { type: MarkerType.ArrowClosed, color: isDarkMode ? "#94A3B8" : "#475569" };
+    const newEdges = te.map((e, i) => ({
+      ...e,
+      id: `e-${plantilla.id}-${stamp}-${i}`,
+      source: idMap[e.source] || e.source,
+      target: idMap[e.target] || e.target,
+      type: "smoothstep",
+      style: edgeStyle,
+      markerEnd: marker,
+      labelStyle: { fontWeight: 800, fontSize: 12 },
+      labelBgPadding: [6, 4] as [number, number],
+      labelBgBorderRadius: 8,
+      labelBgStyle: { fill: isDarkMode ? "#0F172A" : "#FFFFFF", stroke: isDarkMode ? "#334155" : "#CBD5E1" },
+      interactionWidth: 28,
+    }));
+
+    setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes]);
+    setEdges((eds) => [...eds, ...newEdges]);
+    // Encuadra todo tras insertar.
+    setTimeout(() => { try { rfInstanceRef.current?.fitView({ padding: 0.2, duration: 400 }); } catch { /* */ } }, 60);
+  }, [readOnly, isDarkMode, setNodes, setEdges]);
+
+  // Si llega ?tpl=<id> (al crear desde la lista), inserta esa plantilla una vez.
+  const tplInserted = useRef(false);
+  useEffect(() => {
+    if (tplInserted.current) return;
+    const tpl = searchParams?.get("tpl");
+    if (!tpl || !diagrama || readOnly) return;
+    const plant = ISO_PLANTILLAS.find((p) => p.id === tpl);
+    if (!plant) return;
+    tplInserted.current = true;
+    const t = setTimeout(() => insertarPlantilla(plant), 700);
+    return () => clearTimeout(t);
+  }, [searchParams, diagrama, readOnly, insertarPlantilla]);
 
   // Sidebar: filtrar por búsqueda + agrupar
   const shapesFiltrados = useMemo(() => {
@@ -1428,6 +1944,12 @@ function EditorInner() {
                   }`}>
                   <FileText className="w-4 h-4" /> Descargar PDF
                 </button>
+                <button onClick={exportarWord}
+                  className={`w-full px-3 py-2.5 flex items-center gap-2 text-sm text-left ${
+                    isDarkMode ? "hover:bg-white/[0.04] text-sky-300" : "hover:bg-sky-50 text-sky-600"
+                  }`}>
+                  <FileText className="w-4 h-4" /> Descargar Word
+                </button>
               </div>
             </>
           )}
@@ -1451,6 +1973,11 @@ function EditorInner() {
           onPatch={updateSelected}
           tool={tool}
           setTool={setTool}
+          onDuplicate={duplicarSelected}
+          onDelete={eliminarSelected}
+          hasSelection={selectedIds.length > 0}
+          onAlign={alinear}
+          multiCount={selectedIds.length}
         />
       )}
 
@@ -1465,6 +1992,7 @@ function EditorInner() {
             porCategoria={porCategoria}
             openCats={openCats}
             setOpenCats={setOpenCats}
+            onInsertPlantilla={insertarPlantilla}
           />
         )}
 
@@ -1510,13 +2038,17 @@ function EditorInner() {
               snapToGrid
               snapGrid={SNAP_GRID}
             >
-              <Background variant={BackgroundVariant.Lines} gap={24} size={1}
-                color={isDarkMode ? "#1e293b" : "#E5E7EB"} />
-              <Controls className="!shadow-md" />
+              <Background variant={BackgroundVariant.Lines} gap={120} size={1}
+                color={isDarkMode ? "#14203a" : "#EEF2F7"} />
+              <Background id="dots" variant={BackgroundVariant.Dots} gap={24} size={1.4}
+                color={isDarkMode ? "#243049" : "#D9E0EA"} />
+              <Controls className="!shadow-lg !rounded-xl !overflow-hidden" />
               <MiniMap pannable zoomable
                 nodeColor={(n: any) => n.data?.color || "#94A3B8"}
-                maskColor={isDarkMode ? "rgba(15,23,42,0.7)" : "rgba(248,250,252,0.7)"}
-                className="!rounded-xl !shadow-md" />
+                nodeStrokeColor={isDarkMode ? "#0B1220" : "#fff"}
+                nodeBorderRadius={4}
+                maskColor={isDarkMode ? "rgba(7,12,24,0.78)" : "rgba(241,245,249,0.75)"}
+                className="!rounded-xl !shadow-lg" />
             </ReactFlow>
 
             {/* Modal compartir — solo lo abre el propietario */}
@@ -1525,6 +2057,21 @@ function EditorInner() {
                 diagramaId={id}
                 isDark={isDarkMode}
                 onClose={() => setShareOpen(false)}
+              />
+            )}
+
+            {/* Panel: vínculo de la figura con un proceso real del SGC */}
+            {selectedNode && (
+              <ProcesoVinculoPanel
+                node={selectedNode}
+                procesos={procesos}
+                kpis={kpisSGC}
+                riesgos={riesgosSGC}
+                readOnly={readOnly}
+                isDark={isDarkMode}
+                theme={theme}
+                onLink={vincularProceso}
+                onOpenSGC={(path: string) => router.push(path)}
               />
             )}
 
@@ -1571,8 +2118,16 @@ function EditorInner() {
  * Format toolbar (segunda fila)
  * ──────────────────────────────────────────────────────────────────────────── */
 function FormatToolbar({
-  isDark, theme, selectedNode, onPatch, tool, setTool,
+  isDark, theme, selectedNode, onPatch, tool, setTool, onDuplicate, onDelete, hasSelection,
+  onAlign, multiCount,
 }: any) {
+  const multi = (multiCount || 0) >= 2;
+  const AlignBtn = ({ modo, title, children, disabled }: any) => (
+    <button onClick={() => onAlign?.(modo)} title={title} disabled={disabled}
+      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all disabled:opacity-25 disabled:cursor-not-allowed ${
+        isDark ? "text-slate-300 hover:bg-white/[0.05]" : "text-slate-600 hover:bg-slate-100"
+      }`}>{children}</button>
+  );
   const data = selectedNode?.data as ShapeData | undefined;
   const fontSize = data?.fontSize ?? 14;
   const color = data?.color ?? "#3B82F6";
@@ -1710,9 +2265,40 @@ function FormatToolbar({
         );
       })()}
 
-      <span className={`text-[10px] font-bold ml-auto ${theme.textTertiary}`}>
-        {selectedNode ? "1 elemento seleccionado" : "Sin selección"}
-      </span>
+      {/* Alinear y distribuir (2+ seleccionados) */}
+      {multi && (
+        <>
+          <Divider />
+          <AlignBtn modo="left" title="Alinear a la izquierda"><AlignStartVertical className="w-4 h-4" /></AlignBtn>
+          <AlignBtn modo="centerH" title="Centrar horizontalmente"><AlignCenterVertical className="w-4 h-4" /></AlignBtn>
+          <AlignBtn modo="right" title="Alinear a la derecha"><AlignEndVertical className="w-4 h-4" /></AlignBtn>
+          <AlignBtn modo="top" title="Alinear arriba"><AlignStartHorizontal className="w-4 h-4" /></AlignBtn>
+          <AlignBtn modo="middleV" title="Centrar verticalmente"><AlignCenterHorizontal className="w-4 h-4" /></AlignBtn>
+          <AlignBtn modo="bottom" title="Alinear abajo"><AlignEndHorizontal className="w-4 h-4" /></AlignBtn>
+          <AlignBtn modo="distH" title="Distribuir horizontal (3+)" disabled={(multiCount || 0) < 3}><AlignHorizontalDistributeCenter className="w-4 h-4" /></AlignBtn>
+          <AlignBtn modo="distV" title="Distribuir vertical (3+)" disabled={(multiCount || 0) < 3}><AlignVerticalDistributeCenter className="w-4 h-4" /></AlignBtn>
+        </>
+      )}
+
+      <div className="ml-auto flex items-center gap-1">
+        <button onClick={() => hasSelection && onDuplicate?.()} title="Duplicar (Ctrl+D)"
+          disabled={!hasSelection}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
+            isDark ? "text-slate-300 hover:bg-white/[0.05]" : "text-slate-600 hover:bg-slate-100"
+          }`}>
+          <Copy className="w-4 h-4" />
+        </button>
+        <button onClick={() => hasSelection && onDelete?.()} title="Eliminar (Supr)"
+          disabled={!hasSelection}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
+            isDark ? "text-rose-300 hover:bg-rose-500/15" : "text-rose-500 hover:bg-rose-50"
+          }`}>
+          <Trash2 className="w-4 h-4" />
+        </button>
+        <span className={`text-[10px] font-bold ml-1 ${theme.textTertiary}`}>
+          {selectedNode ? "1 elemento" : hasSelection ? "varios" : "Sin selección"}
+        </span>
+      </div>
     </div>
   );
 }
@@ -1721,7 +2307,7 @@ function FormatToolbar({
  * Sidebar — buscador + categorías colapsables (estilo LucidChart)
  * ──────────────────────────────────────────────────────────────────────────── */
 function Sidebar({
-  isDark, theme, search, setSearch, porCategoria, openCats, setOpenCats,
+  isDark, theme, search, setSearch, porCategoria, openCats, setOpenCats, onInsertPlantilla,
 }: any) {
   const onDragStart = (e: React.DragEvent, k: ShapeKind) => {
     e.dataTransfer.setData("application/diagram-shape", k);
@@ -1729,6 +2315,11 @@ function Sidebar({
   };
 
   const cats = Object.keys(porCategoria);
+  const isoOpen = openCats.__iso ?? true;
+  const q = (search || "").trim().toLowerCase();
+  const plantillasFiltradas = q
+    ? ISO_PLANTILLAS.filter((p) => p.nombre.toLowerCase().includes(q) || p.descripcion.toLowerCase().includes(q) || "iso 9001 plantilla".includes(q))
+    : ISO_PLANTILLAS;
 
   return (
     <aside className={`w-64 shrink-0 border-r flex flex-col ${
@@ -1751,7 +2342,38 @@ function Sidebar({
 
       {/* Lista */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-        {cats.length === 0 && (
+        {/* ── Plantillas ISO 9001 ── */}
+        {plantillasFiltradas.length > 0 && (
+          <div className="mb-1">
+            <button
+              onClick={() => setOpenCats((p: any) => ({ ...p, __iso: !isoOpen }))}
+              className={`w-full flex items-center gap-1.5 px-2 py-2 rounded-lg text-left ${
+                isDark ? "hover:bg-white/[0.04]" : "hover:bg-slate-100"
+              }`}>
+              {isoOpen ? <ChevronDown className={`w-3.5 h-3.5 ${theme.textTertiary}`} />
+                       : <ChevronRightIcon className={`w-3.5 h-3.5 ${theme.textTertiary}`} />}
+              <Workflow className="w-3.5 h-3.5 text-fuchsia-500" />
+              <span className={`text-xs font-black uppercase tracking-wider ${theme.textSecondary}`}>Plantillas ISO 9001</span>
+              <span className={`ml-auto text-[10px] ${theme.textTertiary}`}>{plantillasFiltradas.length}</span>
+            </button>
+            {isoOpen && (
+              <div className="space-y-1 px-1 pb-2">
+                {plantillasFiltradas.map((p) => (
+                  <button key={p.id} onClick={() => onInsertPlantilla?.(p)} title={p.descripcion}
+                    className={`w-full text-left px-2.5 py-2 rounded-lg border transition-all hover:scale-[1.01] ${
+                      isDark ? "bg-white/[0.02] border-white/[0.05] hover:border-fuchsia-500/50"
+                             : "bg-white border-slate-200 hover:border-fuchsia-500/50"
+                    }`}>
+                    <div className={`text-xs font-bold ${theme.textPrimary}`}>{p.nombre}</div>
+                    <div className={`text-[10px] leading-tight mt-0.5 ${theme.textTertiary}`}>{p.descripcion}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {cats.length === 0 && plantillasFiltradas.length === 0 && (
           <p className={`text-center text-xs py-8 ${theme.textTertiary}`}>Sin coincidencias</p>
         )}
         {cats.map((cat) => {
@@ -1791,9 +2413,139 @@ function Sidebar({
       </div>
 
       <div className={`p-3 border-t ${theme.divider} text-[10px] ${theme.textTertiary}`}>
-        💡 Arrastra una figura al lienzo. Conecta arrastrando desde los puntos blancos. <b>V</b> selección, <b>H</b> pan, <b>Espacio</b> = pan temporal.
+        💡 Arrastra una figura o una <b>plantilla ISO 9001</b> al lienzo. Conecta desde los puntos blancos.<br />
+        <b>Ctrl+D</b> duplicar · <b>Ctrl+C/V</b> copiar/pegar · <b>flechas</b> mover (Shift = 10px) · <b>Ctrl+Z/Y</b> deshacer/rehacer · <b>V</b> selección · <b>H</b>/Espacio pan.
       </div>
     </aside>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Panel: vincular la figura a un proceso del SGC y ver sus KPIs y riesgos
+ * ──────────────────────────────────────────────────────────────────────────── */
+function ProcesoVinculoPanel({
+  node, procesos, kpis, riesgos, readOnly, isDark, theme, onLink, onOpenSGC,
+}: any) {
+  const [abierto, setAbierto] = useState(true);
+  const ref: number | null = (node?.data?.procesoRef ?? null) as number | null;
+  const procFiltro = (x: any) => x.proceso_ref === ref || x.proceso === ref;
+  const kpisProc = ref != null ? (kpis || []).filter(procFiltro) : [];
+  const riesgosProc = ref != null ? (riesgos || []).filter(procFiltro) : [];
+  const proc = (procesos || []).find((p: any) => p.id === ref);
+
+  const card = isDark ? "bg-[#0F172A]/95 border-white/[0.08]" : "bg-white/95 border-slate-200";
+  const sub = `text-[10px] font-black uppercase tracking-wider ${theme.textTertiary}`;
+
+  const nivelRiesgo = (r: any) => r.nivel || r.nivel_riesgo || r.severidad || r.clasificacion || "";
+  const nivelColor = (n: string) => {
+    const s = String(n).toLowerCase();
+    if (s.includes("alt") || s.includes("crit")) return "#EF4444";
+    if (s.includes("med")) return "#F59E0B";
+    if (s.includes("baj")) return "#10B981";
+    return "#94A3B8";
+  };
+
+  return (
+    <div className={`absolute top-3 right-3 z-30 w-72 rounded-2xl border shadow-xl backdrop-blur-md ${card}`}>
+      <button onClick={() => setAbierto((o) => !o)}
+        className="w-full flex items-center gap-2 px-3 py-2.5">
+        <span className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
+          style={{ background: "linear-gradient(135deg,#0EA5E9,#6366F1)" }}>
+          <Link2 className="w-3.5 h-3.5 text-white" />
+        </span>
+        <span className={`text-xs font-black uppercase tracking-wider ${theme.textSecondary}`}>Proceso del SGC</span>
+        <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${theme.textTertiary} ${abierto ? "" : "-rotate-90"}`} />
+      </button>
+
+      {abierto && (
+        <div className="px-3 pb-3 space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar">
+          {/* Selector de vínculo */}
+          {!readOnly ? (
+            <div>
+              <label className={sub}>Vincular figura a proceso</label>
+              <select
+                value={ref ?? ""}
+                onChange={(e) => onLink?.(e.target.value ? Number(e.target.value) : null)}
+                className={`mt-1 w-full px-2.5 py-2 rounded-lg border text-sm outline-none ${
+                  isDark ? "bg-[#1E293B]/60 border-white/[0.08] text-white" : "bg-white border-slate-200 text-slate-900"
+                }`}>
+                <option value="">— Sin vínculo —</option>
+                {(procesos || []).map((p: any) => (
+                  <option key={p.id} value={p.id}>{p.codigo ? `${p.codigo} · ` : ""}{p.nombre}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className={`text-xs ${theme.textSecondary}`}>{proc ? proc.nombre : "Figura sin proceso vinculado."}</div>
+          )}
+
+          {ref == null ? (
+            <p className={`text-[11px] ${theme.textTertiary}`}>
+              Vincula esta figura a un proceso para ver aquí sus <b>indicadores</b> y <b>riesgos</b> reales del SGC.
+            </p>
+          ) : (
+            <>
+              {/* KPIs */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className={sub}>Indicadores (KPI)</span>
+                  <span className={`text-[10px] ${theme.textTertiary}`}>{kpisProc.length}</span>
+                </div>
+                {kpisProc.length === 0 ? (
+                  <p className={`text-[11px] mt-1 ${theme.textTertiary}`}>Sin KPIs para este proceso.</p>
+                ) : (
+                  <div className="mt-1 space-y-1">
+                    {kpisProc.map((k: any) => (
+                      <div key={k.id} className={`flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 ${isDark ? "bg-white/[0.03]" : "bg-slate-50"}`}>
+                        <span className={`text-xs font-semibold truncate ${theme.textPrimary}`}>{k.nombre}</span>
+                        <span className="flex items-center gap-1.5 shrink-0">
+                          <span className={`text-[11px] font-mono ${theme.textSecondary}`}>{Number(k.valor_actual)}/{Number(k.meta)}{k.unidad}</span>
+                          <span className="w-2 h-2 rounded-full" style={{ background: k.cumple ? "#10B981" : "#EF4444" }} />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Riesgos */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className={sub}>Riesgos</span>
+                  <span className={`text-[10px] ${theme.textTertiary}`}>{riesgosProc.length}</span>
+                </div>
+                {riesgosProc.length === 0 ? (
+                  <p className={`text-[11px] mt-1 ${theme.textTertiary}`}>Sin riesgos para este proceso.</p>
+                ) : (
+                  <div className="mt-1 space-y-1">
+                    {riesgosProc.map((r: any) => {
+                      const nv = nivelRiesgo(r);
+                      return (
+                        <div key={r.id} className={`flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 ${isDark ? "bg-white/[0.03]" : "bg-slate-50"}`}>
+                          <span className={`text-xs font-semibold truncate ${theme.textPrimary}`}>{r.nombre || r.descripcion}</span>
+                          {nv ? <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full shrink-0" style={{ background: `${nivelColor(nv)}22`, color: nivelColor(nv) }}>{nv}</span> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-1.5 pt-1">
+                <button onClick={() => onOpenSGC?.("/sgc/kpis")}
+                  className={`flex-1 text-[11px] font-bold px-2 py-1.5 rounded-lg border ${isDark ? "border-white/[0.08] text-slate-300 hover:bg-white/[0.05]" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                  Ver KPIs
+                </button>
+                <button onClick={() => onOpenSGC?.("/sgc/riesgos")}
+                  className={`flex-1 text-[11px] font-bold px-2 py-1.5 rounded-lg border ${isDark ? "border-white/[0.08] text-slate-300 hover:bg-white/[0.05]" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                  Ver riesgos
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

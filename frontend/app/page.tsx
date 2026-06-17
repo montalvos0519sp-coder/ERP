@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { api } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useUser } from "@/lib/UserContext";
 import {
@@ -262,20 +263,26 @@ const BENEFITS = [
   "No conformidades, auditorias y mejora continua",
   "Agenda de cumplimiento y notificaciones in-app",
   "Encuestas de cliente con link publico (CSAT/NPS)",
-  "Multi-empresa con PAC configurable",
+  "Timbrado SAT con PAC configurable (Factura.com)",
   "Trazabilidad y colaboracion multi-usuario",
   "100% configurable desde la UI",
 ];
 
+// Conteos en vivo por módulo (Mando Central). Etiqueta del dato mostrado.
+const STAT_LABEL: Record<string, string> = {
+  sgc: "KPIs", documentos: "Documentos", procesos: "Diagramas",
+  mantenimiento: "Órdenes", nomina: "Periodos", facturacion: "Facturas",
+  viajes: "Viajes", rh: "Empleados", flota: "Unidades",
+  liquidaciones: "Liquidaciones", compras: "Órdenes",
+};
+
 /* ── ANIMATED NUMBER ─────────────────────────────────────────────────────── */
 function CountUp({ target, suffix = "" }: { target: number; suffix?: string }) {
   const [val, setVal] = useState(0);
-  const ref = useRef(false);
   useEffect(() => {
-    if (ref.current) return;
-    ref.current = true;
+    if (target <= 0) { setVal(0); return; }
     let start = 0;
-    const step = target / 40;
+    const step = Math.max(1, target / 40);
     const t = setInterval(() => {
       start += step;
       if (start >= target) { setVal(target); clearInterval(t); }
@@ -283,11 +290,11 @@ function CountUp({ target, suffix = "" }: { target: number; suffix?: string }) {
     }, 30);
     return () => clearInterval(t);
   }, [target]);
-  return <>{val}{suffix}</>;
+  return <>{val.toLocaleString("es-MX")}{suffix}</>;
 }
 
 /* ── MODULE CARD ─────────────────────────────────────────────────────────── */
-function ModuleCard({ mod, isDark, index }: { mod: any; index: number; isDark: boolean }) {
+function ModuleCard({ mod, isDark, index, live }: { mod: any; index: number; isDark: boolean; live?: { value: number; label: string } }) {
   const [hover, setHover] = useState(false);
   const [visible, setVisible] = useState(false);
   const Icon = mod.icon;
@@ -332,8 +339,12 @@ function ModuleCard({ mod, isDark, index }: { mod: any; index: number; isDark: b
             {mod.nuevo && (
               <span className="px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider text-white" style={{ background: mod.color }}>Nuevo</span>
             )}
-            <p className="text-xl font-black leading-none" style={{ color: mod.color }}>{mod.stat.value}</p>
-            <p className={`text-[9px] font-bold uppercase tracking-wider ${d(isDark, "text-slate-500", "text-slate-400")}`}>{mod.stat.label}</p>
+            <p className="text-xl font-black leading-none" style={{ color: mod.color }}>
+              {live ? live.value.toLocaleString("es-MX") : mod.stat.value}
+            </p>
+            <p className={`text-[9px] font-bold uppercase tracking-wider ${d(isDark, "text-slate-500", "text-slate-400")}`}>
+              {live ? live.label : mod.stat.label}
+            </p>
           </div>
         </div>
 
@@ -368,11 +379,36 @@ export default function Page() {
   const { user, empresaActivaId } = useUser();
   const [activeFilter, setActiveFilter] = useState<string>("all");
   const [tick, setTick] = useState(0);
+  const [liveStats, setLiveStats] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const t = setInterval(() => setTick((p) => p + 1), 3000);
     return () => clearInterval(t);
   }, []);
+
+  // Conteos reales por módulo (DRF devuelve `count`; si no, longitud de results).
+  useEffect(() => {
+    if (!empresaActivaId) return;
+    const emp = String(empresaActivaId);
+    const set = (id: string, r: any) => {
+      const v = typeof r?.count === "number" ? r.count : (Array.isArray(r?.results) ? r.results.length : null);
+      if (v != null) setLiveStats((s) => ({ ...s, [id]: v }));
+    };
+    const tasks: Array<[string, Promise<any>]> = [
+      ["facturacion", api.getFacturas({ empresa: emp, page_size: "1" })],
+      ["nomina", api.getPeriodosNomina({ empresa: emp, page_size: "1" })],
+      ["viajes", api.getViajes({ page_size: "1" })],
+      ["rh", api.getEmpleados({ page_size: "1" })],
+      ["flota", api.getUnidades({ page_size: "1" })],
+      ["compras", api.getOrdenesCompra({ page_size: "1" })],
+      ["liquidaciones", api.getLiquidaciones({ page_size: "1" })],
+      ["documentos", api.getDocumentos({ empresa: emp, page_size: "1" })],
+      ["procesos", api.getDiagramas()],
+      ["sgc", api.getKPIs({ empresa: emp })],
+      ["mantenimiento", api.getOrdenesMantenimiento()],
+    ];
+    tasks.forEach(([id, p]) => p.then((r) => set(id, r)).catch(() => {}));
+  }, [empresaActivaId]);
 
   const empresaActiva = user?.empresas.find((e) => e.id === empresaActivaId) || user?.empresas[0];
 
@@ -446,7 +482,7 @@ export default function Page() {
             </h1>
 
             <div className="flex items-center gap-2 mb-5 justify-center lg:justify-start">
-              <span className={`text-sm ${d(isDark, "text-slate-400", "text-slate-500")}`}>Configurable + Multi-Empresa →</span>
+              <span className={`text-sm ${d(isDark, "text-slate-400", "text-slate-500")}`}>Sistema integral configurable →</span>
               <span className="text-sm font-bold text-indigo-400 min-w-[180px] transition-all duration-500">
                 {rotating[tick % rotating.length]}
               </span>
@@ -457,7 +493,7 @@ export default function Page() {
             </p>
 
             <div className="flex flex-wrap gap-3 justify-center lg:justify-start">
-              {["ISO 9001 ✓", "CFDI 4.0 ✓", "Carta Porte 3.1 ✓", "Multi-empresa ✓"].map((b) => (
+              {["ISO 9001 ✓", "CFDI 4.0 ✓", "Carta Porte 3.1 ✓", "Nómina 1.2 ✓"].map((b) => (
                 <span key={b} className="px-3 py-1.5 rounded-xl text-xs font-bold border"
                   style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)", borderColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)", color: isDark ? "#94a3b8" : "#64748b" }}>
                   {b}
@@ -468,10 +504,10 @@ export default function Page() {
 
           <div className="shrink-0 grid grid-cols-2 gap-3">
             {[
-              { label: "Modulos", value: 15, suffix: "+", color: "#6366F1" },
-              { label: "Calidad SGC", value: 16, suffix: "", color: "#10B981" },
-              { label: "Catalogos SAT", value: 157, suffix: "K+", color: "#F59E0B" },
-              { label: "Cumplimiento", value: 100, suffix: "%", color: "#14B8A6" },
+              { label: "Modulos", value: MODULES.length, suffix: "", color: "#6366F1" },
+              { label: "Indicadores KPI", value: liveStats.sgc ?? 0, suffix: "", color: "#10B981" },
+              { label: "Facturas", value: liveStats.facturacion ?? 0, suffix: "", color: "#F59E0B" },
+              { label: "Viajes", value: liveStats.viajes ?? 0, suffix: "", color: "#14B8A6" },
             ].map((s) => (
               <div key={s.label} className="w-28 h-24 rounded-2xl border flex flex-col items-center justify-center gap-1"
                 style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.7)", borderColor: s.color + "30" }}>
@@ -511,7 +547,8 @@ export default function Page() {
       {/* ── MODULE GRID ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 mb-8">
         {shown.map((mod, i) => (
-          <ModuleCard key={mod.id} mod={mod} isDark={isDark} index={i} />
+          <ModuleCard key={mod.id} mod={mod} isDark={isDark} index={i}
+            live={liveStats[mod.id] != null ? { value: liveStats[mod.id], label: STAT_LABEL[mod.id] || mod.stat.label } : undefined} />
         ))}
       </div>
 

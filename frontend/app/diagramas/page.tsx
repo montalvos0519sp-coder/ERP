@@ -46,6 +46,21 @@ type Filtro = "all" | "BORRADOR" | "ESPERA" | "VISTO" | "APROBADO" | "RECHAZADO"
 const esEspera = (d: DiagramaListItem) => d.estado === "EN_REVISION" && !d.visto_por_aprobador_en;
 const esVisto = (d: DiagramaListItem) => d.estado === "EN_REVISION" && !!d.visto_por_aprobador_en;
 
+// Plantillas ISO 9001 (metadatos; el diagrama real lo arma el editor vía ?tpl=).
+const PLANTILLAS_META: Array<{ id: string; nombre: string; desc: string; emoji: string }> = [
+  { id: "", nombre: "En blanco", desc: "Lienzo vacío", emoji: "▦" },
+  { id: "mapa-procesos", nombre: "Mapa de procesos", desc: "Estratégicos · operativos · apoyo (4.4)", emoji: "🗺️" },
+  { id: "tortuga", nombre: "Diagrama de tortuga", desc: "Caracterización del proceso", emoji: "🐢" },
+  { id: "phva", nombre: "Ciclo PHVA", desc: "Planificar·Hacer·Verificar·Actuar", emoji: "🔄" },
+  { id: "sipoc", nombre: "SIPOC", desc: "Proveedor·Entrada·Proceso·Salida·Cliente", emoji: "📊" },
+  { id: "procedimiento", nombre: "Procedimiento", desc: "Flujo con decisión y fin", emoji: "📋" },
+  { id: "no-conformidad", nombre: "No conformidad", desc: "Acción correctiva (10.2)", emoji: "⚠️" },
+  { id: "organigrama", nombre: "Organigrama", desc: "Estructura y responsabilidades (5.3)", emoji: "🏢" },
+  { id: "gestion-riesgos", nombre: "Gestión de riesgos", desc: "Riesgos y oportunidades (6.1)", emoji: "🎯" },
+  { id: "gestion-cambio", nombre: "Gestión del cambio", desc: "Cambios controlados (6.3)", emoji: "🔧" },
+  { id: "foda", nombre: "Análisis FODA", desc: "Contexto de la organización (4.1)", emoji: "🧭" },
+];
+
 export default function DiagramasListPage() {
   const router = useRouter();
   const { isDarkMode, theme } = useTheme();
@@ -54,6 +69,7 @@ export default function DiagramasListPage() {
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [nuevo, setNuevo] = useState({ titulo: "", descripcion: "" });
+  const [plantilla, setPlantilla] = useState<string>("");
   const [filtro, setFiltro] = useState<Filtro>("all");
 
   // Estado del modal "Enviar a aprobacion" desde la lista.
@@ -78,14 +94,16 @@ export default function DiagramasListPage() {
   }, []);
 
   const crear = async () => {
-    if (!nuevo.titulo.trim()) return;
+    const meta = PLANTILLAS_META.find((p) => p.id === plantilla);
+    const titulo = nuevo.titulo.trim() || (plantilla ? meta?.nombre : "") || "";
+    if (!titulo) return;
     try {
       const d = await api.crearDiagrama({
-        titulo: nuevo.titulo.trim(),
+        titulo,
         descripcion: nuevo.descripcion.trim(),
         data: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
       });
-      router.push(`/diagramas/${d.id}`);
+      router.push(`/diagramas/${d.id}${plantilla ? `?tpl=${plantilla}` : ""}`);
     } catch (e) {
       alert((e as Error).message);
     }
@@ -317,13 +335,38 @@ export default function DiagramasListPage() {
         <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
           onClick={() => setShowNew(false)}>
           <div onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-md rounded-3xl border p-6 space-y-4 ${
+            className={`w-full max-w-xl rounded-3xl border p-6 space-y-4 max-h-[92vh] overflow-auto ${
               isDarkMode ? "bg-[#0F172A] border-white/[0.06]" : "bg-white border-slate-200"
             }`}>
             <div>
               <h2 className={`text-lg font-black ${theme.textPrimary}`}>Nuevo diagrama</h2>
-              <p className={`text-xs ${theme.textTertiary}`}>Empieza con un canvas vacío.</p>
+              <p className={`text-xs ${theme.textTertiary}`}>Elige una plantilla ISO 9001 o empieza en blanco.</p>
             </div>
+
+            {/* Selector de plantilla */}
+            <div>
+              <label className={`block text-xs font-bold mb-1.5 ${theme.textSecondary}`}>Plantilla</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {PLANTILLAS_META.map((p) => {
+                  const active = plantilla === p.id;
+                  return (
+                    <button key={p.id || "blank"} type="button" onClick={() => setPlantilla(p.id)}
+                      className={`text-left rounded-xl border p-2.5 transition-all ${
+                        active
+                          ? "border-transparent text-white shadow-md"
+                          : isDarkMode ? "bg-white/[0.03] border-white/[0.06] hover:border-fuchsia-500/40 text-slate-200"
+                                       : "bg-white border-slate-200 hover:border-fuchsia-500/40 text-slate-700"
+                      }`}
+                      style={active ? { background: "linear-gradient(135deg,#EC4899,#8B5CF6)" } : undefined}>
+                      <div className="text-base leading-none mb-1">{p.emoji}</div>
+                      <div className="text-xs font-bold leading-tight">{p.nombre}</div>
+                      <div className={`text-[10px] leading-tight mt-0.5 ${active ? "text-white/80" : theme.textTertiary}`}>{p.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <label className={`block text-xs font-bold mb-1 ${theme.textSecondary}`}>Título</label>
               <input autoFocus value={nuevo.titulo}
@@ -348,11 +391,11 @@ export default function DiagramasListPage() {
               />
             </div>
             <div className="flex gap-2 justify-end pt-2">
-              <button onClick={() => setShowNew(false)}
+              <button onClick={() => { setShowNew(false); setPlantilla(""); }}
                 className={`px-4 py-2 rounded-xl text-sm font-bold border ${
                   isDarkMode ? "bg-white/[0.04] border-white/[0.06] text-slate-200" : "bg-white border-slate-200 text-slate-700"
                 }`}>Cancelar</button>
-              <button onClick={crear} disabled={!nuevo.titulo.trim()}
+              <button onClick={crear} disabled={!nuevo.titulo.trim() && !plantilla}
                 className="px-4 py-2 rounded-xl text-sm font-bold text-white shadow-md disabled:opacity-40"
                 style={{ background: "linear-gradient(135deg,#EC4899,#8B5CF6)" }}>
                 Crear y editar
